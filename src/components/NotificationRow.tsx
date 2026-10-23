@@ -16,10 +16,21 @@ interface NotificationRowProps {
   onUpdateNotification?: (notification: BuildingNotification) => void;
 }
 
+const isLocalizacaoContinuacao = (loc?: string) => {
+  const val = (loc || '').trim().toUpperCase();
+  return [
+    'PROTOCOLO',
+    'INTERNET',
+    'PASTA INTERNET',
+    'ENTREGUE NET',
+    'PRONTO',
+  ].includes(val);
+};
+
 const getUrgencyClasses = (notification: BuildingNotification) => {
   const prazo = calcularPrazoProcesso(notification);
 
-  if (prazo.isConcluido) {
+  if (prazo.isConcluido || isLocalizacaoContinuacao(notification.detalhesSST?.localizacao)) {
     return {
       row: 'bg-emerald-50/80 border-emerald-200',
       badge: 'bg-emerald-100 text-emerald-700 border-emerald-300',
@@ -75,10 +86,10 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
   const getLocalizacaoStyle = (loc?: string) => {
     const val = (loc || '').trim().toUpperCase();
     if (val === 'DIRETOR') return 'bg-red-700 text-white border-red-800 font-bold';
-    if (val === 'PRONTO') return 'bg-sky-100 text-sky-900 border-sky-300 font-bold';
-    if (val === 'INTERNET' || val === 'ENTREGUE NET' || val === 'PASTA INTERNET') return 'bg-blue-700 text-white border-blue-800 font-bold';
+    if (val === 'PRONTO') return 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold';
+    if (val === 'INTERNET' || val === 'ENTREGUE NET' || val === 'PASTA INTERNET') return 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold';
     if (val === 'CX AUTORIZAÇÕES' || val === 'CX AUTORIZACOES') return 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
-    if (val === 'DIR. DIVISÃO' || val === 'DIR. DIVISAO' || val === 'PROTOCOLO') return 'bg-slate-100 text-slate-800 border-slate-300 font-semibold';
+    if (val === 'DIR. DIVISÃO' || val === 'DIR. DIVISAO' || val === 'PROTOCOLO') return 'bg-emerald-100 text-emerald-900 border-emerald-300 font-semibold';
     return 'bg-slate-100 text-slate-800 border-slate-200 font-medium';
   };
 
