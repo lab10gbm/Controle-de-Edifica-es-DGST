@@ -11,35 +11,29 @@ export const OBM_LIST = [
 ];
 
 export const STATUS_LIST = [
-  'INDEFERIDO',
-  'DEFERIDO',
-  'APROVADO',
-  'ENTREGUE',
   'EM ANÁLISE',
-  'AGUARDANDO',
-  'RETORNANDO',
-  'GERADO DI',
-  'EM ANDAMENTO',
-  'PRONTO',
-  'ASSINANDO',
-  'Encerrado',
-  'Notificação',
-  'Auto de Infração',
-  'Interdição',
-  'Notificação Preventiva',
-  'TAC',
+  'INDEFERIDO',
+  'APROVADO',
+];
+
+export const DETALHE_STATUS_LIST = [
+  'BILHETE 1',
+  'RETORNO 1B',
+  'BILHETE 2',
+  'RETORNO 2B',
+  'BILHETE 3',
+  'RETORNO 3B',
+  'BILHETE 4',
+  'RETORNO 4B',
+  'BILHETE 5',
+  'RETORNO 5B',
 ];
 
 export const LOCALIZACAO_LIST = [
   'PROTOCOLO',
   'DIR. DIVISÃO',
   'DIRETOR',
-  'PRONTO',
-  'ENTREGUE NET',
-  'PASTA INTERNET',
   'INTERNET',
-  'PRANCHETA',
-  'CX AUTORIZAÇÕES',
 ];
 
 export const TIPOS_PROCESSO_LIST = [
