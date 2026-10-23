@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BuildingNotification, 
@@ -21,6 +16,21 @@ import { exportToCSV, isExpired, calcularPrazoProcesso } from './utils/helpers';
 import { RotateCw, ShieldCheck } from 'lucide-react';
 
 const STORAGE_KEY = 'cbmerj_sst_notificacoes_v7';
+
+const getUrgencyPriority = (item: BuildingNotification) => {
+  const prazo = calcularPrazoProcesso(item);
+
+  if (prazo.isConcluido) {
+    return 3;
+  }
+  if (prazo.isVencido) {
+    return 0;
+  }
+  if (prazo.diasRestantes !== null && prazo.diasRestantes <= 5) {
+    return 1;
+  }
+  return 2;
+};
 
 export default function App() {
   // Database State with LocalStorage
@@ -175,6 +185,13 @@ export default function App() {
         return true;
       })
       .sort((a, b) => {
+        const urgA = getUrgencyPriority(a);
+        const urgB = getUrgencyPriority(b);
+
+        if (urgA !== urgB) {
+          return urgA - urgB;
+        }
+
         let valA: any = a[filters.ordenacaoCampo];
         let valB: any = b[filters.ordenacaoCampo];
 
