@@ -58,7 +58,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
 
   // States para cadastro de novo bilhete (presente e futuro)
   const [isAddingBilhete, setIsAddingBilhete] = useState(false);
-  const [novoBilheteTipo, setNovoBilheteTipo] = useState<'intermediario' | 'ultimo'>('intermediario');
+  const [novoDetalheTipo, setNovoDetalheTipo] = useState<'BILHETE' | 'RETORNO'>('BILHETE');
   const [novoBilheteData, setNovoBilheteData] = useState(() => new Date().toLocaleDateString('pt-BR'));
   const [novoBilheteDias, setNovoBilheteDias] = useState<string>('0');
   const [novoBilheteStatus, setNovoBilheteStatus] = useState<string>('EM ANÁLISE');
@@ -82,6 +82,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           id: `b-1-${notification.id}`,
           ordem: 1,
           tipo: 'primeiro' as const,
+          tipoDetalhe: 'BILHETE' as const,
           rotulo: '1º Bilhete (Data do Bilhete)',
           data: dataBilheteFmt,
           dias: diasBilheteVal,
@@ -93,6 +94,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           id: `b-ultimo-${notification.id}`,
           ordem: 2,
           tipo: 'ultimo' as const,
+          tipoDetalhe: 'RETORNO' as const,
           rotulo: 'Último Bilhete (Data do Último Bilhete)',
           data: ultimoBilheteFmt,
           dias: diasUltimoBilheteVal,
@@ -120,11 +122,15 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     if (!novoBilheteData.trim()) return;
 
     const dataFormatada = formatDateBR(novoBilheteData.trim());
+    const proximoNumero = listaBilhetes.length + 1;
+    const detalheRotulo = novoDetalheTipo === 'RETORNO' ? `Retorno ${proximoNumero}B` : `Bilhete ${proximoNumero}`;
+
     const novoItem: BilheteItem = {
       id: `b-manual-${Date.now()}`,
-      ordem: listaBilhetes.length + 1,
-      tipo: novoBilheteTipo,
-      rotulo: novoBilheteTipo === 'ultimo' ? 'Último Bilhete (Atualizado)' : `Bilhete Intermediário #${listaBilhetes.length + 1}`,
+      ordem: proximoNumero,
+      tipo: novoDetalheTipo === 'RETORNO' ? 'ultimo' : 'intermediario',
+      tipoDetalhe: novoDetalheTipo,
+      rotulo: detalheRotulo,
       data: dataFormatada,
       dias: novoBilheteDias.trim() || '0',
       statusOuParecer: novoBilheteStatus.trim() || 'Registrado',
@@ -137,7 +143,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     const updatedSST = {
       ...sst,
       listaBilhetes: novaLista,
-      ...(novoBilheteTipo === 'ultimo' ? {
+      ...(novoDetalheTipo === 'RETORNO' ? {
         ultimoBilhete: dataFormatada,
         diasUltimoBilhete: novoBilheteDias.trim() || '0',
       } : {}),
@@ -148,8 +154,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
       id: `log-b-${Date.now()}`,
       data: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
       autor: authorName.trim() || 'Fiscal SST 10º GBM',
-      acao: novoBilheteTipo === 'ultimo' ? 'Atualização de Último Bilhete' : 'Registro de Bilhete Intermediário',
-      detalhes: `Bilhete registrado em ${dataFormatada} (${novoBilheteDias} dias decorridos). Situação: ${novoBilheteStatus}. ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
+      acao: novoDetalheTipo === 'RETORNO' ? 'Atualização de Retorno' : 'Registro de Bilhete',
+      detalhes: `${novoDetalheTipo === 'RETORNO' ? 'Retorno' : 'Bilhete'} registrado em ${dataFormatada} (${novoBilheteDias} dias decorridos). Situação: ${novoBilheteStatus}. ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
     };
 
     if (onUpdateNotification) {
@@ -162,7 +168,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     } else {
       onAddQuickNote(
         notification.id,
-        `Bilhete ${novoBilheteTipo} registrado (${dataFormatada}, ${novoBilheteDias} dias decorridos): ${novoBilheteStatus}. ${novoBilheteDespacho}`,
+        `${novoDetalheTipo === 'RETORNO' ? 'Retorno' : 'Bilhete'} registrado (${dataFormatada}, ${novoBilheteDias} dias decorridos): ${novoBilheteStatus}. ${novoBilheteDespacho}`,
         authorName
       );
     }
@@ -288,6 +294,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
             type="button"
             onClick={() => onEdit(notification)}
             className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer"
+            title="Editar processo"
           >
             <Edit3 className="w-3.5 h-3.5 text-blue-600" />
             <span>Editar</span>
@@ -297,7 +304,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
 
       {/* Main Tab Content Panel */}
       <div className="pt-4">
-        {/* Tab 1: Requerente (Aba Inicial Padrão) */}
         {activeTab === 'requerente' && (
           <div className="max-w-xl">
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-3.5 text-xs">
@@ -347,10 +353,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           </div>
         )}
 
-        {/* Tab 2: Trâmite & Cronologia */}
         {activeTab === 'tramite' && (
           <div className="space-y-4">
-            {/* Quick Metrics Bar com Prazos Calculados */}
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div className="bg-white p-3 rounded-lg border border-blue-200 bg-blue-50/30 shadow-2xs">
                 <span className="text-[11px] font-semibold text-blue-900 block uppercase">Prazo do Tipo</span>
@@ -405,7 +409,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </div>
             </div>
 
-            {/* Structured Process Timeline (4 Fases Visuais) */}
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
                 <Timer className="w-4 h-4 text-blue-600" />
@@ -413,7 +416,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </h4>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">
-                {/* Etapa 1: Entradas */}
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5 text-xs">
                   <div className="font-bold text-slate-700 flex items-center gap-1.5 border-b border-slate-200 pb-1">
                     <span className="w-2 h-2 rounded-full bg-blue-600" />
@@ -433,7 +435,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </div>
                 </div>
 
-                {/* Etapa 2: Divisão & Direção */}
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5 text-xs">
                   <div className="font-bold text-slate-700 flex items-center gap-1.5 border-b border-slate-200 pb-1">
                     <span className="w-2 h-2 rounded-full bg-amber-600" />
@@ -456,7 +457,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </div>
                 </div>
 
-                {/* Etapa 3: Produção & Conclusão */}
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5 text-xs">
                   <div className="font-bold text-slate-700 flex items-center gap-1.5 border-b border-slate-200 pb-1">
                     <span className="w-2 h-2 rounded-full bg-indigo-600" />
@@ -479,7 +479,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </div>
                 </div>
 
-                {/* Etapa 4: Entrega & Documento Gerado */}
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5 text-xs">
                   <div className="font-bold text-slate-700 flex items-center gap-1.5 border-b border-slate-200 pb-1">
                     <span className="w-2 h-2 rounded-full bg-emerald-600" />
@@ -507,7 +506,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           </div>
         )}
 
-        {/* Tab 3: Documentos & Vínculos */}
         {activeTab === 'documentos' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2 text-xs">
@@ -581,12 +579,9 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           </div>
         )}
 
-        {/* Tab 4: Bilhetes & Histórico */}
         {activeTab === 'historico' && (
           <div className="space-y-4">
-            {/* 1. Métricas Principais dos Bilhetes */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Card 1: 1º Bilhete (Data do Bilhete) */}
               <div className="bg-white p-3.5 rounded-xl border border-blue-200 bg-blue-50/20 shadow-2xs">
                 <div className="flex items-center justify-between pb-1.5 border-b border-blue-100 mb-2">
                   <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
@@ -617,7 +612,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 </p>
               </div>
 
-              {/* Card 2: Último Bilhete (Data do Último Bilhete) */}
               <div className="bg-white p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/20 shadow-2xs">
                 <div className="flex items-center justify-between pb-1.5 border-b border-indigo-100 mb-2">
                   <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
@@ -648,7 +642,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 </p>
               </div>
 
-              {/* Card 3: Outros Bilhetes & Pareceres Intermediários */}
               <div className="bg-white p-3.5 rounded-xl border border-purple-200 bg-purple-50/20 shadow-2xs">
                 <div className="flex items-center justify-between pb-1.5 border-b border-purple-100 mb-2">
                   <span className="text-[11px] font-bold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
@@ -672,7 +665,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </div>
             </div>
 
-            {/* 2. Relação Estruturada dos Bilhetes Cadastrados + Ação de Adicionar */}
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                 <div>
@@ -694,7 +686,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 </button>
               </div>
 
-              {/* Formulário expansível para adicionar novo bilhete (presente & futuro) */}
               {isAddingBilhete && (
                 <form onSubmit={handleSaveNovoBilhete} className="p-3.5 bg-blue-50/50 rounded-lg border border-blue-200 space-y-3 animate-in fade-in">
                   <div className="flex items-center justify-between border-b border-blue-200/60 pb-1.5">
@@ -707,14 +698,14 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs">
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Tipo de Bilhete</label>
+                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Tipo de Detalhe</label>
                       <select
-                        value={novoBilheteTipo}
-                        onChange={(e) => setNovoBilheteTipo(e.target.value as any)}
+                        value={novoDetalheTipo}
+                        onChange={(e) => setNovoDetalheTipo(e.target.value as 'BILHETE' | 'RETORNO')}
                         className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
                       >
-                        <option value="intermediario">Bilhete Intermediário</option>
-                        <option value="ultimo">Novo Último Bilhete</option>
+                        <option value="BILHETE">Bilhete</option>
+                        <option value="RETORNO">Retorno</option>
                       </select>
                     </div>
 
@@ -783,7 +774,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 </form>
               )}
 
-              {/* Tabela de Bilhetes Cadastrados */}
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden">
                   <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
@@ -805,7 +795,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                         <td className="py-2 px-3">
                           <div className="flex items-center gap-1.5">
                             <span className={`inline-block w-2 h-2 rounded-full ${
-                              bilhete.tipo === 'primeiro' ? 'bg-blue-600' : bilhete.tipo === 'ultimo' ? 'bg-indigo-600' : 'bg-purple-600'
+                              bilhete.tipoDetalhe === 'RETORNO' ? 'bg-indigo-600' : bilhete.tipo === 'ultimo' ? 'bg-indigo-600' : 'bg-purple-600'
                             }`} />
                             <strong className="text-slate-900 font-semibold">
                               {bilhete.rotulo || (bIdx === 0 ? '1º Bilhete (Data do Bilhete)' : 'Último Bilhete')}
@@ -842,7 +832,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </div>
             </div>
 
-            {/* 3. Timeline de Histórico e Linha do Tempo */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="lg:col-span-2 bg-white p-4 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between border-b pb-2">
@@ -883,7 +872,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 )}
               </div>
 
-              {/* Formulário para registrar novo despacho técnico rápido */}
               <div className="bg-white p-4 rounded-xl border border-slate-200">
                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Send className="w-4 h-4 text-emerald-600" />
