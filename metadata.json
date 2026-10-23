@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Controle de Edificações e Notificações",
+  "description": "Painel administrativo de gerenciamento, fiscalização e controle de notificações e edificações para Seção de Segurança Contra Incêndio e Pânico (SST / 10º GBM).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
