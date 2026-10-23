@@ -23,12 +23,15 @@ const getUrgencyPriority = (item: BuildingNotification) => {
   if (prazo.isConcluido) {
     return 3;
   }
+
   if (prazo.isVencido) {
     return 0;
   }
+
   if (prazo.diasRestantes !== null && prazo.diasRestantes <= 5) {
     return 1;
   }
+
   return 2;
 };
 
