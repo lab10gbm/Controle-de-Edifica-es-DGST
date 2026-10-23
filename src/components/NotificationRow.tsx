@@ -1,9 +1,8 @@
 import React from 'react';
 import { BuildingNotification } from '../types';
-import { formatDateBR, formatProcesso, isExpired, calcularPrazoProcesso } from '../utils/helpers';
-import { LOCALIZACAO_LIST } from '../data/initialData';
+import { formatDateBR, formatProcesso, calcularPrazoProcesso } from '../utils/helpers';
 import { RowExpandedDetails } from './RowExpandedDetails';
-import { ChevronDown, ChevronUp, AlertCircle, Eye, EyeOff, CheckCircle2, Calendar, FileText, Clock } from 'lucide-react';
+import { ChevronDown, ChevronUp, AlertCircle, CheckCircle2, FileText, Clock } from 'lucide-react';
 
 interface NotificationRowProps {
   notification: BuildingNotification;
@@ -17,6 +16,48 @@ interface NotificationRowProps {
   onUpdateNotification?: (notification: BuildingNotification) => void;
 }
 
+const getUrgencyClasses = (notification: BuildingNotification) => {
+  const prazo = calcularPrazoProcesso(notification);
+
+  if (prazo.isConcluido) {
+    return {
+      row: 'bg-emerald-50/80 border-emerald-200',
+      badge: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+      text: 'text-emerald-700',
+      date: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      label: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    };
+  }
+
+  if (prazo.isVencido || (prazo.diasRestantes !== null && prazo.diasRestantes <= 0)) {
+    return {
+      row: 'bg-red-50 border-red-200 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.15)]',
+      badge: 'bg-red-100 text-red-700 border-red-300',
+      text: 'text-red-700',
+      date: 'bg-red-50 text-red-700 border-red-200',
+      label: 'bg-red-100 text-red-700 border-red-200',
+    };
+  }
+
+  if (prazo.diasRestantes !== null && prazo.diasRestantes <= 5) {
+    return {
+      row: 'bg-orange-50 border-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.15)]',
+      badge: 'bg-orange-100 text-orange-700 border-orange-300',
+      text: 'text-orange-700',
+      date: 'bg-orange-50 text-orange-700 border-orange-200',
+      label: 'bg-orange-100 text-orange-700 border-orange-200',
+    };
+  }
+
+  return {
+    row: 'bg-white border-slate-200 hover:bg-sky-50/40',
+    badge: 'bg-slate-100 text-slate-800 border-slate-200',
+    text: 'text-slate-900',
+    date: 'bg-slate-50 text-slate-900 border-slate-200',
+    label: 'bg-blue-50 text-blue-700 border-blue-200',
+  };
+};
+
 export const NotificationRow: React.FC<NotificationRowProps> = ({
   notification,
   isExpanded,
@@ -29,29 +70,18 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
   onUpdateNotification,
 }) => {
   const prazoInfo = calcularPrazoProcesso(notification);
-  const expired = prazoInfo.isVencido;
+  const urgency = getUrgencyClasses(notification);
 
   const getLocalizacaoStyle = (loc?: string) => {
     const val = (loc || '').trim().toUpperCase();
-    if (val === 'DIRETOR') {
-      return 'bg-red-700 text-white border-red-800 font-bold';
-    }
-    if (val === 'PRONTO') {
-      return 'bg-sky-100 text-sky-900 border-sky-300 font-bold';
-    }
-    if (val === 'INTERNET' || val === 'ENTREGUE NET' || val === 'PASTA INTERNET') {
-      return 'bg-blue-700 text-white border-blue-800 font-bold';
-    }
-    if (val === 'CX AUTORIZAÇÕES' || val === 'CX AUTORIZACOES') {
-      return 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
-    }
-    if (val === 'DIR. DIVISÃO' || val === 'DIR. DIVISAO' || val === 'PROTOCOLO') {
-      return 'bg-slate-100 text-slate-800 border-slate-300 font-semibold';
-    }
+    if (val === 'DIRETOR') return 'bg-red-700 text-white border-red-800 font-bold';
+    if (val === 'PRONTO') return 'bg-sky-100 text-sky-900 border-sky-300 font-bold';
+    if (val === 'INTERNET' || val === 'ENTREGUE NET' || val === 'PASTA INTERNET') return 'bg-blue-700 text-white border-blue-800 font-bold';
+    if (val === 'CX AUTORIZAÇÕES' || val === 'CX AUTORIZACOES') return 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+    if (val === 'DIR. DIVISÃO' || val === 'DIR. DIVISAO' || val === 'PROTOCOLO') return 'bg-slate-100 text-slate-800 border-slate-300 font-semibold';
     return 'bg-slate-100 text-slate-800 border-slate-200 font-medium';
   };
 
-  // Status badge styling
   const renderStatus = () => {
     const st = String(notification.status || '').toUpperCase();
     if (st.includes('INDEFERID')) {
@@ -143,40 +173,30 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
   return (
     <>
       <tr
-        className={`border-b border-slate-200 text-xs sm:text-sm transition-colors ${
+        className={`border-b border-slate-200 text-xs sm:text-sm transition-all duration-200 ${
           notification.oculto
             ? 'bg-slate-100/70 text-slate-400 opacity-60'
-            : isExpanded
-            ? 'bg-blue-50/70 font-normal'
-            : 'bg-white hover:bg-sky-50/40'
+            : `${urgency.row} ${isExpanded ? 'ring-1 ring-sky-200' : ''}`
         }`}
       >
-        {/* Coluna 1: Código com botão "Ver mais" */}
         <td className="py-2.5 px-3 text-center align-middle whitespace-nowrap w-24">
           <button
             type="button"
             onClick={() => onToggleExpand(notification.id)}
             className={`inline-flex items-center justify-center gap-1 px-3 py-1 text-xs font-normal border rounded shadow-2xs transition-colors cursor-pointer select-none ${
-              isExpanded
-                ? 'bg-blue-700 text-white border-blue-800'
-                : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-300'
+              isExpanded ? 'bg-blue-700 text-white border-blue-800' : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-300'
             }`}
           >
             <span>{isExpanded ? 'Ver menos' : 'Ver mais'}</span>
-            {isExpanded ? (
-              <ChevronUp className="w-3 h-3 ml-0.5" />
-            ) : (
-              <ChevronDown className="w-3 h-3 ml-0.5" />
-            )}
+            {isExpanded ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
           </button>
         </td>
 
-        {/* Coluna 2: PROCESSO / REQUERENTE / TIPO – ORIGEM */}
         <td className="py-2.5 px-3 align-middle">
           <div className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-3.5">
-            <div className="text-xs text-slate-500 whitespace-nowrap leading-tight shrink-0 flex flex-col items-start bg-slate-50 border border-slate-200/80 rounded px-2 py-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">PROCESSO</span>
-              <strong className="text-slate-900 font-bold font-mono text-xs mt-0.5">
+            <div className={`text-xs whitespace-nowrap leading-tight shrink-0 flex flex-col items-start border rounded px-2 py-1 ${urgency.label}`}>
+              <span className="text-[10px] font-bold uppercase tracking-wider">PROCESSO</span>
+              <strong className="font-bold font-mono text-xs mt-0.5">
                 {formatProcesso(notification.processo !== undefined ? notification.processo : notification.numero)}
               </strong>
             </div>
@@ -191,7 +211,6 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
           </div>
         </td>
 
-        {/* Coluna 3: DATA DE ENTRADA */}
         <td className="py-2.5 px-3 align-middle whitespace-nowrap font-mono text-xs">
           <div className="font-bold text-slate-900 tracking-tight">
             {formatDateBR(notification.dataEntrada || notification.dataExpedicao)}
@@ -203,12 +222,10 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
           )}
         </td>
 
-        {/* Coluna 4: STATUS */}
         <td className="py-2.5 px-3 align-middle whitespace-nowrap">
           {renderStatus()}
         </td>
 
-        {/* Coluna 5: PRAZO LIMITE / TRÂMITE */}
         <td className="py-2.5 px-3 align-middle whitespace-nowrap text-xs">
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
@@ -216,18 +233,17 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
                 className={`font-mono font-bold tracking-tight px-1.5 py-0.5 rounded border ${
                   prazoInfo.isConcluido
                     ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                    : prazoInfo.isVencido
-                    ? 'text-rose-700 bg-rose-50 border-rose-200'
+                    : prazoInfo.isVencido || (prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 0)
+                    ? 'text-red-700 bg-red-50 border-red-200'
+                    : prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 5
+                    ? 'text-orange-700 bg-orange-50 border-orange-200'
                     : 'text-slate-900 bg-slate-50 border-slate-200'
                 }`}
                 title={`Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Prazo Limite: ${prazoInfo.dataLimiteBR}`}
               >
                 {prazoInfo.dataLimiteBR}
               </span>
-              <span
-                className="text-[10px] font-mono px-1 py-0.2 rounded bg-blue-50 text-blue-800 font-semibold border border-blue-200 shrink-0"
-                title={`Prazo legal deste tipo (${notification.tipoProcesso || 'Processo'}): ${prazoInfo.diasPrazo} dias`}
-              >
+              <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-blue-50 text-blue-800 font-semibold border border-blue-200 shrink-0">
                 {prazoInfo.diasPrazo}d
               </span>
             </div>
@@ -235,20 +251,17 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
             <div className="text-[10.5px] font-sans mt-0.5">
               {prazoInfo.isConcluido ? (
                 <span className="text-emerald-700 font-medium">Concluído / Entregue</span>
-              ) : prazoInfo.isVencido ? (
-                <span className="text-rose-700 font-bold">
-                  Vencido ({prazoInfo.diasEmAtraso}d em atraso)
-                </span>
+              ) : prazoInfo.isVencido || (prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 0) ? (
+                <span className="text-red-700 font-bold">Vencido ({prazoInfo.diasEmAtraso}d em atraso)</span>
+              ) : prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 5 ? (
+                <span className="text-orange-700 font-bold">{prazoInfo.diasRestantes} dias restantes</span>
               ) : (
-                <span className="text-blue-700 font-medium">
-                  {prazoInfo.diasRestantes !== null ? `${prazoInfo.diasRestantes} dias restantes` : 'No prazo'}
-                </span>
+                <span className="text-blue-700 font-medium">{prazoInfo.diasRestantes !== null ? `${prazoInfo.diasRestantes} dias restantes` : 'No prazo'}</span>
               )}
             </div>
           </div>
         </td>
 
-        {/* Coluna 6: LOCALIZAÇÃO */}
         <td className="py-2.5 px-3 align-middle whitespace-nowrap">
           <span
             title="Localização do processo (altere através do botão Editar)"
@@ -260,14 +273,9 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
           </span>
         </td>
 
-        {/* Coluna 7: Ações (Editar | Ocultar/Exibir) */}
         <td className="py-2.5 px-3 align-middle text-right sm:text-center whitespace-nowrap">
           <div className="inline-flex items-center gap-1.5 text-xs">
-            <button
-              type="button"
-              onClick={() => onEdit(notification)}
-              className="text-blue-700 hover:text-blue-900 font-medium hover:underline cursor-pointer"
-            >
+            <button type="button" onClick={() => onEdit(notification)} className="text-blue-700 hover:text-blue-900 font-medium hover:underline cursor-pointer">
               Editar
             </button>
             <span className="text-slate-300">|</span>
@@ -283,7 +291,6 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
         </td>
       </tr>
 
-      {/* Linha expandida (Accordion / Detalhes) */}
       {isExpanded && (
         <tr>
           <td colSpan={7} className="p-0">
