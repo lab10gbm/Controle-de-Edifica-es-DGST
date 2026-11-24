@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldCheck, LogIn, Cloud, Lock, CalendarRange, AlertCircle } from 'lucide-react';
-import { signInWithGoogle } from '../firebase';
+import { signInWithGoogle, AUTHORIZED_EMAIL } from '../firebase';
 
 interface AuthGateProps {
   onError?: (message: string) => void;
@@ -18,11 +18,17 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onError }) => {
       await signInWithGoogle();
     } catch (err: any) {
       const code = err?.code || '';
+      const currentHost =
+        typeof window !== 'undefined' ? window.location.hostname : 'seu domínio';
       let msg = 'Não foi possível concluir o login com o Google.';
       if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         msg = 'A janela de login do Google foi fechada antes da conclusão. Clique novamente para entrar.';
       } else if (code === 'auth/popup-blocked') {
         msg = 'O navegador bloqueou a janela pop-up de login. Permita pop-ups para este site e tente novamente.';
+      } else if (code === 'auth/unauthorized-domain') {
+        msg = `Domínio "${currentHost}" ainda não autorizado no Firebase Authentication. Adicione "${currentHost}" em Firebase Console → Authentication → Settings → Authorized domains (projeto durable-reflection-cv0ns).`;
+      } else if (code === 'auth/unauthorized-email') {
+        msg = err?.message || `Acesso restrito ao e-mail autorizado (${AUTHORIZED_EMAIL}).`;
       } else {
         console.error('Erro ao autenticar com Google:', err);
         if (err?.message) {
@@ -93,7 +99,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onError }) => {
               <div>
                 <p className="font-semibold text-slate-800">Acesso Privado e Protegido</p>
                 <p className="text-slate-500">
-                  Somente o usuário autenticado com e-mail verificado acessa e altera os registros.
+                  Somente a conta autorizada (<strong>{AUTHORIZED_EMAIL}</strong>) acessa e altera os registros.
                 </p>
               </div>
             </div>

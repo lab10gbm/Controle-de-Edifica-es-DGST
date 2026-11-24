@@ -34,10 +34,19 @@ try {
   dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 }
 
+export const AUTHORIZED_EMAIL = 'sst10gbm@gmail.com';
+
+export function isAuthorizedUser(user: User | null | undefined): boolean {
+  return Boolean(user?.email && user.email.trim().toLowerCase() === AUTHORIZED_EMAIL);
+}
+
 export const db = dbInstance;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+  login_hint: AUTHORIZED_EMAIL,
+});
 
 export enum OperationType {
   CREATE = 'create',
@@ -108,7 +117,18 @@ export async function signInWithGoogle(): Promise<User> {
     return activeSignInPromise;
   }
   activeSignInPromise = signInWithPopup(auth, googleProvider)
-    .then((result) => result.user)
+    .then(async (result) => {
+      if (!isAuthorizedUser(result.user)) {
+        const attemptedEmail = result.user?.email || 'desconhecido';
+        await signOut(auth);
+        const err = new Error(
+          `Acesso restrito ao e-mail ${AUTHORIZED_EMAIL}. A conta "${attemptedEmail}" não tem permissão.`
+        ) as Error & { code?: string };
+        err.code = 'auth/unauthorized-email';
+        throw err;
+      }
+      return result.user;
+    })
     .finally(() => {
       activeSignInPromise = null;
     });

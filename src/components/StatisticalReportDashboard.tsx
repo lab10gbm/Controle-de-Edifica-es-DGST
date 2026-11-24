@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { BuildingNotification } from '../types';
 import { OBM_LIST } from '../data/initialData';
 import { formatDateBR, formatProcesso } from '../utils/helpers';
@@ -14,11 +14,16 @@ import {
   ReportCategory,
   ReportDateBasis,
 } from '../utils/statisticalReport';
+import { generateStatisticalPdfReport } from '../utils/statisticalReportPdf';
+import { StatisticalPrintModal } from './StatisticalPrintModal';
 import {
   BarChart3,
   CalendarRange,
+  CheckCircle2,
   FileDown,
+  FileText,
   Filter,
+  Loader2,
   Printer,
   ShieldCheck,
   Table2,
@@ -104,6 +109,10 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
     key: string;
     title: string;
   } | null>(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfGeneratedNotice, setPdfGeneratedNotice] = useState<string | null>(null);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const chartSvgRef = useRef<SVGSVGElement | null>(null);
 
   // Sincroniza quando o usuário troca o ano global no cabeçalho
   React.useEffect(() => {
@@ -258,8 +267,39 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
   const plotHeight = svgHeight - padTop - padBottom;
   const groupSlotWidth = plotWidth / Math.max(1, chartGroups.length);
 
+  const handleDownloadPdf = async () => {
+    if (isGeneratingPdf) return;
+    setIsGeneratingPdf(true);
+    setPdfGeneratedNotice(null);
+    try {
+      await generateStatisticalPdfReport({
+        matrix,
+        officialTitle: activePeriod.officialTitle,
+        reportYear,
+        monthsSubtitle,
+        hiddenMonths,
+        monthColors: MONTH_SERIES_COLORS,
+        svgElement: chartSvgRef.current,
+        options: {
+          order: 'table-first',
+        },
+      });
+      setPdfGeneratedNotice(
+        `PDF do Quadro + Gráfico (${activePeriod.officialTitle} / ${reportYear}) baixado com sucesso. Abra o arquivo .pdf para imprimir.`
+      );
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handlePrintReport = () => {
+    setPdfGeneratedNotice(null);
+    setIsPrintModalOpen(true);
+  };
+
   return (
-    <div className="space-y-5">
+    <>
+    <div className={isPrintModalOpen ? 'space-y-5 print:hidden' : 'space-y-5'}>
       {/* Control Toolbar (hidden when printing) */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 sm:p-5 space-y-4 print:hidden">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 pb-3 border-b border-slate-100">
@@ -291,14 +331,47 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
 
             <button
               type="button"
-              onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-red-700 hover:bg-red-800 rounded-lg shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              onClick={handlePrintReport}
+              disabled={isGeneratingPdf}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Imprimir Quadro + Gráfico</span>
+              {isGeneratingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Printer className="w-3.5 h-3.5" />
+              )}
+              <span>{isGeneratingPdf ? 'Gerando PDF...' : 'Imprimir Quadro + Gráfico'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleDownloadPdf()}
+              disabled={isGeneratingPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-60 border border-slate-300 rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Baixar arquivo PDF A4 pronto com Gráfico + Quadro Oficial"
+            >
+              <FileText className="w-3.5 h-3.5 text-red-700" />
+              <span>Baixar PDF</span>
             </button>
           </div>
         </div>
+
+        {pdfGeneratedNotice && (
+          <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="font-medium">{pdfGeneratedNotice}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPdfGeneratedNotice(null)}
+              className="text-emerald-700 hover:text-emerald-950 p-0.5 cursor-pointer shrink-0"
+              aria-label="Fechar confirmação"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Period Type + Specific Period + Secondary Filters */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-end">
@@ -488,235 +561,9 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
         </div>
       </div>
 
-      {/* Main Content: Chart + Official Statistical Table */}
+      {/* Main Content: Official Statistical Table First, Grouped Bar Chart Second */}
       <div className="space-y-5 print:space-y-6">
-        {/* Card 1: Official Grouped Bar Chart (modeled on attached chart image) */}
-        <section className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 sm:p-6 print:border-slate-300 print:shadow-none print:break-inside-avoid">
-          <div className="text-center space-y-0.5 mb-4">
-            <h3 className="text-sm sm:text-base font-bold text-slate-900 uppercase tracking-tight">
-              Gráfico da Estatística de Solicitações de Processos
-            </h3>
-            <p className="text-xs sm:text-sm font-bold text-slate-700 uppercase">
-              {activePeriod.officialTitle} / {reportYear}
-            </p>
-          </div>
-
-          <div className="border border-slate-200 rounded-lg p-4 sm:p-5 bg-white relative">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-              <span className="text-sm sm:text-base font-medium text-slate-600">
-                {monthsSubtitle}
-              </span>
-
-              {/* Interactive Legend */}
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                {activePeriod.months.map((m, idx) => {
-                  const color = MONTH_SERIES_COLORS[idx % MONTH_SERIES_COLORS.length];
-                  const isHidden = hiddenMonths.has(m);
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => toggleMonthSeries(m)}
-                      title={
-                        isHidden
-                          ? `Clique para exibir ${MONTH_FULL_PT[m]}`
-                          : `Clique para ocultar ${MONTH_FULL_PT[m]}`
-                      }
-                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold transition-opacity cursor-pointer print:cursor-default ${
-                        isHidden ? 'opacity-35 line-through text-slate-400' : 'text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <span
-                        className="w-3 h-3 rounded-xs shrink-0"
-                        style={{ backgroundColor: color }}
-                      />
-                      <span>{MONTH_ABBR[m]}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {matrix.grandTotal === 0 ? (
-              <div className="py-16 text-center space-y-2 text-slate-500">
-                <p className="text-sm font-semibold text-slate-700">
-                  Sem processos encontrados para {activePeriod.officialTitle} / {reportYear}
-                </p>
-                <p className="text-xs max-w-md mx-auto">
-                  Nenhum registro possui data correspondente neste período. Selecione outro trimestre/quadrimestre/semestre ou importe a planilha CSV atualizada.
-                </p>
-              </div>
-            ) : (
-              <div className="relative w-full overflow-x-auto">
-                <svg
-                  viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-                  className="w-full min-w-[680px] h-auto select-none"
-                  role="img"
-                  aria-label={`Gráfico de solicitações de processos — ${activePeriod.officialTitle} de ${reportYear}`}
-                >
-                  {/* Horizontal Gridlines & Y-Axis Labels */}
-                  {ticks.map((tick) => {
-                    const ratio = maxTick > 0 ? tick / maxTick : 0;
-                    const y = padTop + plotHeight - ratio * plotHeight;
-                    const isBaseline = tick === 0;
-                    return (
-                      <g key={tick}>
-                        <line
-                          x1={padLeft}
-                          y1={y}
-                          x2={svgWidth - padRight}
-                          y2={y}
-                          stroke={isBaseline ? '#475569' : '#E2E8F0'}
-                          strokeWidth={isBaseline ? 1.5 : 1}
-                        />
-                        <text
-                          x={padLeft - 10}
-                          y={y + 4}
-                          textAnchor="end"
-                          className="fill-slate-600 text-[11px] font-mono"
-                        >
-                          {tick}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* Grouped Bars per Category */}
-                  {chartGroups.map((group, gIdx) => {
-                    const slotStart = padLeft + gIdx * groupSlotWidth;
-                    const slotCenter = slotStart + groupSlotWidth / 2;
-                    const innerPad = Math.min(26, groupSlotWidth * 0.16);
-                    const usableGroupW = Math.max(24, groupSlotWidth - innerPad * 2);
-                    const numBars = Math.max(1, visibleMonths.length);
-                    const barGap = numBars >= 5 ? 3 : 5;
-                    const barW = Math.min(
-                      26,
-                      Math.max(8, (usableGroupW - barGap * (numBars - 1)) / numBars)
-                    );
-                    const totalBarsW = numBars * barW + (numBars - 1) * barGap;
-                    const barsStartX = slotCenter - totalBarsW / 2;
-                    const labelLines = CATEGORY_MULTILINE_LABELS[group.key] || [group.label];
-
-                    return (
-                      <g key={group.key}>
-                        {visibleMonths.map((month, visIdx) => {
-                          const origMonthIdx = activePeriod.months.indexOf(month);
-                          const color =
-                            MONTH_SERIES_COLORS[origMonthIdx % MONTH_SERIES_COLORS.length];
-                          const val = group.valuesByMonth[month] || 0;
-                          const ratio = maxTick > 0 ? val / maxTick : 0;
-                          const barH = val > 0 ? Math.max(3, ratio * plotHeight) : 0;
-                          const bx = barsStartX + visIdx * (barW + barGap);
-                          const by = padTop + plotHeight - barH;
-                          const monthTotal = matrix.totalsByMonth[month] || 0;
-
-                          return (
-                            <g
-                              key={month}
-                              className="cursor-pointer"
-                              onMouseEnter={() =>
-                                setHoveredBar({
-                                  groupLabel: group.label,
-                                  month,
-                                  value: val,
-                                  monthTotal,
-                                  xPct: ((bx + barW / 2) / svgWidth) * 100,
-                                  yPct: (by / svgHeight) * 100,
-                                })
-                              }
-                              onMouseLeave={() => setHoveredBar(null)}
-                              onClick={() => {
-                                if (val > 0) {
-                                  const cellKey = `${group.key}::${month}`;
-                                  setDrilldownCell({
-                                    key: cellKey,
-                                    title: `${group.label} · ${MONTH_FULL_PT[month]} / ${reportYear}`,
-                                  });
-                                }
-                              }}
-                            >
-                              <rect
-                                x={bx}
-                                y={by}
-                                width={barW}
-                                height={barH}
-                                rx={2.5}
-                                ry={2.5}
-                                fill={color}
-                                className="transition-opacity duration-150 hover:opacity-85"
-                              />
-                              {showBarValues && val > 0 && (
-                                <text
-                                  x={bx + barW / 2}
-                                  y={Math.max(12, by - 5)}
-                                  textAnchor="middle"
-                                  className="fill-slate-700 text-[10px] font-bold font-mono"
-                                >
-                                  {val}
-                                </text>
-                              )}
-                            </g>
-                          );
-                        })}
-
-                        {/* Multi-line centered Category Label */}
-                        <text
-                          x={slotCenter}
-                          y={padTop + plotHeight + 18}
-                          textAnchor="middle"
-                          className="fill-slate-700 text-[10.5px] font-semibold uppercase"
-                        >
-                          {labelLines.map((line, lineIdx) => (
-                            <tspan
-                              key={lineIdx}
-                              x={slotCenter}
-                              dy={lineIdx === 0 ? 0 : 13}
-                            >
-                              {line}
-                            </tspan>
-                          ))}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* X-Axis Caption ("PROCESSO") */}
-                  <text
-                    x={padLeft + plotWidth / 2}
-                    y={svgHeight - 8}
-                    textAnchor="middle"
-                    className="fill-slate-600 text-[11px] font-bold uppercase tracking-wider"
-                  >
-                    PROCESSO
-                  </text>
-                </svg>
-
-                {/* Hover Tooltip */}
-                {hoveredBar && (
-                  <div
-                    className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap print:hidden"
-                    style={{
-                      left: `${Math.min(88, Math.max(12, hoveredBar.xPct))}%`,
-                      top: `${Math.max(16, hoveredBar.yPct)}%`,
-                    }}
-                  >
-                    <p className="font-bold text-slate-100">{hoveredBar.groupLabel}</p>
-                    <p className="text-slate-300 text-[11px] mt-0.5 tabular-nums">
-                      {MONTH_FULL_PT[hoveredBar.month]}: <strong className="text-white font-mono">{hoveredBar.value}</strong>{' '}
-                      {hoveredBar.groupLabel !== 'TOTAL' && hoveredBar.monthTotal > 0 && (
-                        <span>
-                          ({((hoveredBar.value / hoveredBar.monthTotal) * 100).toFixed(1).replace('.', ',')}%)
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Card 2: Official Statistical Matrix + Distribution Share */}
+        {/* Card 1: Official Statistical Matrix + Distribution Share */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
           {/* Official Table (modeled on attached table image) */}
           <section className="xl:col-span-8 bg-white border border-slate-200 rounded-xl shadow-xs p-5 sm:p-6 print:col-span-12 print:border-slate-300 print:shadow-none print:break-inside-avoid">
@@ -933,6 +780,233 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
           </section>
         </div>
 
+        {/* Card 2: Official Grouped Bar Chart (modeled on attached chart image) */}
+        <section className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 sm:p-6 print:border-slate-300 print:shadow-none print:break-inside-avoid">
+          <div className="text-center space-y-0.5 mb-4">
+            <h3 className="text-sm sm:text-base font-bold text-slate-900 uppercase tracking-tight">
+              Gráfico da Estatística de Solicitações de Processos
+            </h3>
+            <p className="text-xs sm:text-sm font-bold text-slate-700 uppercase">
+              {activePeriod.officialTitle} / {reportYear}
+            </p>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg p-4 sm:p-5 bg-white relative">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+              <span className="text-sm sm:text-base font-medium text-slate-600">
+                {monthsSubtitle}
+              </span>
+
+              {/* Interactive Legend */}
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                {activePeriod.months.map((m, idx) => {
+                  const color = MONTH_SERIES_COLORS[idx % MONTH_SERIES_COLORS.length];
+                  const isHidden = hiddenMonths.has(m);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => toggleMonthSeries(m)}
+                      title={
+                        isHidden
+                          ? `Clique para exibir ${MONTH_FULL_PT[m]}`
+                          : `Clique para ocultar ${MONTH_FULL_PT[m]}`
+                      }
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold transition-opacity cursor-pointer print:cursor-default ${
+                        isHidden ? 'opacity-35 line-through text-slate-400' : 'text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span
+                        className="w-3 h-3 rounded-xs shrink-0"
+                        style={{ backgroundColor: color }}
+                      />
+                      <span>{MONTH_ABBR[m]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {matrix.grandTotal === 0 ? (
+              <div className="py-16 text-center space-y-2 text-slate-500">
+                <p className="text-sm font-semibold text-slate-700">
+                  Sem processos encontrados para {activePeriod.officialTitle} / {reportYear}
+                </p>
+                <p className="text-xs max-w-md mx-auto">
+                  Nenhum registro possui data correspondente neste período. Selecione outro trimestre/quadrimestre/semestre ou importe a planilha CSV atualizada.
+                </p>
+              </div>
+            ) : (
+              <div className="relative w-full overflow-x-auto print:overflow-visible">
+                <svg
+                  ref={chartSvgRef}
+                  viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                  className="w-full min-w-[680px] print:min-w-0 h-auto select-none"
+                  role="img"
+                  aria-label={`Gráfico de solicitações de processos — ${activePeriod.officialTitle} de ${reportYear}`}
+                >
+                  {/* Horizontal Gridlines & Y-Axis Labels */}
+                  {ticks.map((tick) => {
+                    const ratio = maxTick > 0 ? tick / maxTick : 0;
+                    const y = padTop + plotHeight - ratio * plotHeight;
+                    const isBaseline = tick === 0;
+                    return (
+                      <g key={tick}>
+                        <line
+                          x1={padLeft}
+                          y1={y}
+                          x2={svgWidth - padRight}
+                          y2={y}
+                          stroke={isBaseline ? '#475569' : '#E2E8F0'}
+                          strokeWidth={isBaseline ? 1.5 : 1}
+                        />
+                        <text
+                          x={padLeft - 10}
+                          y={y + 4}
+                          textAnchor="end"
+                          className="fill-slate-600 text-[11px] font-mono"
+                        >
+                          {tick}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Grouped Bars per Category */}
+                  {chartGroups.map((group, gIdx) => {
+                    const slotStart = padLeft + gIdx * groupSlotWidth;
+                    const slotCenter = slotStart + groupSlotWidth / 2;
+                    const innerPad = Math.min(26, groupSlotWidth * 0.16);
+                    const usableGroupW = Math.max(24, groupSlotWidth - innerPad * 2);
+                    const numBars = Math.max(1, visibleMonths.length);
+                    const barGap = numBars >= 5 ? 3 : 5;
+                    const barW = Math.min(
+                      26,
+                      Math.max(8, (usableGroupW - barGap * (numBars - 1)) / numBars)
+                    );
+                    const totalBarsW = numBars * barW + (numBars - 1) * barGap;
+                    const barsStartX = slotCenter - totalBarsW / 2;
+                    const labelLines = CATEGORY_MULTILINE_LABELS[group.key] || [group.label];
+
+                    return (
+                      <g key={group.key}>
+                        {visibleMonths.map((month, visIdx) => {
+                          const origMonthIdx = activePeriod.months.indexOf(month);
+                          const color =
+                            MONTH_SERIES_COLORS[origMonthIdx % MONTH_SERIES_COLORS.length];
+                          const val = group.valuesByMonth[month] || 0;
+                          const ratio = maxTick > 0 ? val / maxTick : 0;
+                          const barH = val > 0 ? Math.max(3, ratio * plotHeight) : 0;
+                          const bx = barsStartX + visIdx * (barW + barGap);
+                          const by = padTop + plotHeight - barH;
+                          const monthTotal = matrix.totalsByMonth[month] || 0;
+
+                          return (
+                            <g
+                              key={month}
+                              className="cursor-pointer"
+                              onMouseEnter={() =>
+                                setHoveredBar({
+                                  groupLabel: group.label,
+                                  month,
+                                  value: val,
+                                  monthTotal,
+                                  xPct: ((bx + barW / 2) / svgWidth) * 100,
+                                  yPct: (by / svgHeight) * 100,
+                                })
+                              }
+                              onMouseLeave={() => setHoveredBar(null)}
+                              onClick={() => {
+                                if (val > 0) {
+                                  const cellKey = `${group.key}::${month}`;
+                                  setDrilldownCell({
+                                    key: cellKey,
+                                    title: `${group.label} · ${MONTH_FULL_PT[month]} / ${reportYear}`,
+                                  });
+                                }
+                              }}
+                            >
+                              <rect
+                                x={bx}
+                                y={by}
+                                width={barW}
+                                height={barH}
+                                rx={2.5}
+                                ry={2.5}
+                                fill={color}
+                                className="transition-opacity duration-150 hover:opacity-85"
+                              />
+                              {showBarValues && val > 0 && (
+                                <text
+                                  x={bx + barW / 2}
+                                  y={Math.max(12, by - 5)}
+                                  textAnchor="middle"
+                                  className="fill-slate-700 text-[10px] font-bold font-mono"
+                                >
+                                  {val}
+                                </text>
+                              )}
+                            </g>
+                          );
+                        })}
+
+                        {/* Multi-line centered Category Label */}
+                        <text
+                          x={slotCenter}
+                          y={padTop + plotHeight + 18}
+                          textAnchor="middle"
+                          className="fill-slate-700 text-[10.5px] font-semibold uppercase"
+                        >
+                          {labelLines.map((line, lineIdx) => (
+                            <tspan
+                              key={lineIdx}
+                              x={slotCenter}
+                              dy={lineIdx === 0 ? 0 : 13}
+                            >
+                              {line}
+                            </tspan>
+                          ))}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* X-Axis Caption ("PROCESSO") */}
+                  <text
+                    x={padLeft + plotWidth / 2}
+                    y={svgHeight - 8}
+                    textAnchor="middle"
+                    className="fill-slate-600 text-[11px] font-bold uppercase tracking-wider"
+                  >
+                    PROCESSO
+                  </text>
+                </svg>
+
+                {/* Hover Tooltip */}
+                {hoveredBar && (
+                  <div
+                    className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap print:hidden"
+                    style={{
+                      left: `${Math.min(88, Math.max(12, hoveredBar.xPct))}%`,
+                      top: `${Math.max(16, hoveredBar.yPct)}%`,
+                    }}
+                  >
+                    <p className="font-bold text-slate-100">{hoveredBar.groupLabel}</p>
+                    <p className="text-slate-300 text-[11px] mt-0.5 tabular-nums">
+                      {MONTH_FULL_PT[hoveredBar.month]}: <strong className="text-white font-mono">{hoveredBar.value}</strong>{' '}
+                      {hoveredBar.groupLabel !== 'TOTAL' && hoveredBar.monthTotal > 0 && (
+                        <span>
+                          ({((hoveredBar.value / hoveredBar.monthTotal) * 100).toFixed(1).replace('.', ',')}%)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
         {/* Drilldown Drawer: Audit exact records behind a clicked table cell or bar */}
         {drilldownCell && (
           <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden print:hidden">
@@ -1008,5 +1082,23 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
         )}
       </div>
     </div>
+
+    <StatisticalPrintModal
+      isOpen={isPrintModalOpen}
+      onClose={() => setIsPrintModalOpen(false)}
+      matrix={matrix}
+      officialTitle={activePeriod.officialTitle}
+      reportYear={reportYear}
+      monthsSubtitle={monthsSubtitle}
+      hiddenMonths={hiddenMonths}
+      monthColors={MONTH_SERIES_COLORS}
+      chartGroups={chartGroups}
+      visibleMonths={visibleMonths}
+      ticks={ticks}
+      maxTick={maxTick}
+      showBarValues={showBarValues}
+      categoryMultilineLabels={CATEGORY_MULTILINE_LABELS}
+    />
+    </>
   );
 };

@@ -32,7 +32,9 @@ service cloud.firestore {
     }
 
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'sst10gbm@gmail.com';
     }
 
     function isOwner(userId) {
@@ -40,7 +42,7 @@ service cloud.firestore {
     }
 
     function isBootstrappedAdmin() {
-      return isVerifiedUser() && request.auth.token.email == 'sst10gbm@gmail.com';
+      return isVerifiedUser();
     }
 
     function isAdmin() {

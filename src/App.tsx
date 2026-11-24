@@ -19,7 +19,7 @@ import {
   getRecordYearAndNumber,
   parseProcessLinkRef,
 } from './utils/processLinks';
-import { auth, signOutFirebase } from './firebase';
+import { auth, isAuthorizedUser, signOutFirebase } from './firebase';
 import {
   batchImportNotificationsToFirestore,
   clearYearNotificationsInFirestore,
@@ -110,6 +110,15 @@ export default function App() {
   // Monitor Firebase Authentication
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser && !isAuthorizedUser(firebaseUser)) {
+        await signOutFirebase().catch(() => {});
+        setUser(null);
+        setAuthReady(true);
+        setNotifications([]);
+        setRemoteYears([]);
+        return;
+      }
+
       setUser(firebaseUser);
       setAuthReady(true);
 
