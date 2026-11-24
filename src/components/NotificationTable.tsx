@@ -1,11 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BuildingNotification } from '../types';
 import { NotificationRow } from './NotificationRow';
-import {
-  calcularPrazoProcesso,
-  extractProcessoNumero,
-  parseProcessoE27,
-} from '../utils/helpers';
+import { calcularPrazoProcesso } from '../utils/helpers';
 import { buildProcessLinkIndex } from '../utils/processLinks';
 import {
   AlertTriangle,
@@ -35,6 +31,7 @@ interface NotificationTableProps {
   onEnsureProcessVisible?: (target: BuildingNotification) => void;
   onOpenImportModal?: () => void;
   onOpenNewRecordModal?: () => void;
+  selectedLocalizacao?: string;
 }
 
 const normalizeLocalizacao = (loc?: string) =>
@@ -64,50 +61,6 @@ const isNaturalArchiveLocation = (loc?: string) =>
   isInternetLocation(loc) || isCxAutorizacoesLocation(loc);
 
 const isProntoLocation = (loc?: string) => normalizeLocalizacao(loc) === 'PRONTO';
-
-const getProcessoYearAndNumber = (item: BuildingNotification): { ano: number; numero: number } => {
-  const parsed = parseProcessoE27(item.processo !== undefined ? item.processo : item.numero);
-  const numero =
-    item.numero > 0 ? item.numero : parsed?.numero || extractProcessoNumero(item.processo);
-  const anoRaw =
-    parsed?.ano ||
-    item.anoExercicio ||
-    (item.dataEntrada || item.dataExpedicao || '').match(/\b(20\d{2}|19\d{2})\b/)?.[1] ||
-    '2026';
-
-  return {
-    ano: parseInt(anoRaw, 10) || 2026,
-    numero: numero || 0,
-  };
-};
-
-const compareByNumeroAndAno = (a: BuildingNotification, b: BuildingNotification): number => {
-  const pa = getProcessoYearAndNumber(a);
-  const pb = getProcessoYearAndNumber(b);
-  if (pa.ano !== pb.ano) return pa.ano - pb.ano;
-  return pa.numero - pb.numero;
-};
-
-const getPrazoSortKey = (item: BuildingNotification): number => {
-  const prazo = calcularPrazoProcesso(item);
-  if (prazo.hasDataPronto || prazo.isConcluido) {
-    return 1_000_000;
-  }
-  if (prazo.isVencido) {
-    return -Math.max(1, prazo.diasEmAtraso);
-  }
-  if (prazo.diasRestantes !== null) {
-    return prazo.diasRestantes;
-  }
-  return 999_999;
-};
-
-const compareByPrazoPriority = (a: BuildingNotification, b: BuildingNotification): number => {
-  const keyA = getPrazoSortKey(a);
-  const keyB = getPrazoSortKey(b);
-  if (keyA !== keyB) return keyA - keyB;
-  return compareByNumeroAndAno(a, b);
-};
 
 const NotificationTableHead: React.FC = () => (
   <thead>
@@ -173,6 +126,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
   onEnsureProcessVisible,
   onOpenImportModal,
   onOpenNewRecordModal,
+  selectedLocalizacao,
 }) => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isActiveExpanded, setIsActiveExpanded] = useState(true);
@@ -180,6 +134,17 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const highlightTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!selectedLocalizacao) return;
+    if (isProntoLocation(selectedLocalizacao)) {
+      setIsProntoExpanded(true);
+    } else if (isNaturalArchiveLocation(selectedLocalizacao)) {
+      setIsArchiveExpanded(true);
+    } else {
+      setIsActiveExpanded(true);
+    }
+  }, [selectedLocalizacao]);
 
   useEffect(() => {
     return () => {
@@ -279,12 +244,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
       }
     }
 
-    // Seção 1 (Em Tramitação): prioridade máxima para o prazo (vencidos e mais próximos ao vencimento primeiro)
-    active.sort(compareByPrazoPriority);
-    // Seções 2 e 3 (Processos Prontos e Arquivamento Natural): ordem numérica + ano
-    pronto.sort(compareByNumeroAndAno);
-    archived.sort(compareByNumeroAndAno);
-
+    // Todos os dashboards preservam exatamente a ordenação numérica/selecionada vinda dos filtros (independente do DOC gerado ou tipo)
     return {
       activeNotifications: active,
       prontoNotifications: pronto,
@@ -384,7 +344,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
                 )}
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Prioridade por prazo legal (vencidos e próximos do vencimento primeiro) · {prontoNotifications.length} em pronto · {archivedNotifications.length} em arquivamento natural
+                Ordenado numericamente por processo e ano (independente de DOC gerado ou tipo) · {prontoNotifications.length} em pronto · {archivedNotifications.length} em arquivamento natural
               </p>
             </div>
           </div>
@@ -406,7 +366,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
                 <div className="flex flex-wrap items-center gap-2">
                   <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>
-                    Exibindo <strong className="text-slate-800 tabular-nums">{activeNotifications.length}</strong> processo(s) em tramitação ordenados por <strong className="text-slate-700">prazo limite</strong>
+                    Exibindo <strong className="text-slate-800 tabular-nums">{activeNotifications.length}</strong> processo(s) em tramitação em <strong className="text-slate-700">ordem numérica</strong>
                   </span>
                 </div>
                 <button

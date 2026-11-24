@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { BuildingNotification } from '../types';
 import { OBM_LIST } from '../data/initialData';
-import { formatDateBR, formatProcesso } from '../utils/helpers';
+import { formatDateBR, formatProcesso, extractProcessoNumero, parseProcessoE27 } from '../utils/helpers';
 import {
   buildStatisticalMatrix,
   exportStatisticalMatrixCSV,
@@ -246,8 +246,18 @@ export const StatisticalReportDashboard: React.FC<StatisticalReportDashboardProp
 
   const drilldownRecords = useMemo(() => {
     if (!drilldownCell) return [];
-    return matrix.recordsByCell[drilldownCell.key] || [];
-  }, [drilldownCell, matrix]);
+    const list = [...(matrix.recordsByCell[drilldownCell.key] || [])];
+    return list.sort((a, b) => {
+      const pa = parseProcessoE27(a.processo !== undefined ? a.processo : a.numero);
+      const pb = parseProcessoE27(b.processo !== undefined ? b.processo : b.numero);
+      const numA = pa?.numero || (a.numero > 0 ? a.numero : extractProcessoNumero(a.processo));
+      const numB = pb?.numero || (b.numero > 0 ? b.numero : extractProcessoNumero(b.processo));
+      const anoA = parseInt(pa?.ano || a.anoExercicio || String(reportYear), 10) || reportYear;
+      const anoB = parseInt(pb?.ano || b.anoExercicio || String(reportYear), 10) || reportYear;
+      if (anoA !== anoB) return anoA - anoB;
+      return numA - numB;
+    });
+  }, [drilldownCell, matrix, reportYear]);
 
   const monthsSubtitle = formatMonthsListPT(activePeriod.months);
   const yearOptions = useMemo(() => {

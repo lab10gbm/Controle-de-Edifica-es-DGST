@@ -266,6 +266,75 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "FiscalizacaoRecord": {
+      "title": "FiscalizacaoRecord",
+      "description": "Registro de Notificação, Auto de Infração, Interdição ou TAC da fiscalização DGST/10º GBM.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "codigo": { "type": "number" },
+        "edificacao": { "type": "string", "maxLength": 300 },
+        "documentoCpfCnpj": { "type": "string", "maxLength": 40 },
+        "enderecoCompleto": { "type": "string", "maxLength": 400 },
+        "municipio": { "type": "string", "maxLength": 120 },
+        "processoVinculado": { "type": "string", "maxLength": 120 },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Notificação",
+            "1º Auto de Infração",
+            "2º Auto de Infração",
+            "Auto de Interdição por Inércia",
+            "Auto de Interdição por Perigo iminente",
+            "TAC em Andamento",
+            "Encerrado",
+            "Cancelado"
+          ]
+        },
+        "dataExpedicao": { "type": "string", "maxLength": 40 },
+        "dataValidade": { "type": "string", "maxLength": 40 },
+        "anoExpedicao": { "type": "string", "maxLength": 4 },
+        "rgFiscal": { "type": "string", "maxLength": 40 },
+        "fiscalResponsavel": { "type": "string", "maxLength": 160 },
+        "orgaoPrincipal": { "type": "string", "maxLength": 40 },
+        "ultimoNumeroAto": { "type": "string", "maxLength": 40 },
+        "historicoAtos": { "type": "array" },
+        "historicoTexto": { "type": "string", "maxLength": 2000 },
+        "redacao": { "type": "string", "maxLength": 4000 },
+        "observacoes": { "type": "string", "maxLength": 2000 },
+        "criadoEm": { "type": "string", "maxLength": 64 },
+        "atualizadoEm": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "codigo",
+        "edificacao",
+        "documentoCpfCnpj",
+        "enderecoCompleto",
+        "municipio",
+        "processoVinculado",
+        "status",
+        "dataExpedicao",
+        "dataValidade",
+        "anoExpedicao",
+        "rgFiscal",
+        "fiscalResponsavel",
+        "orgaoPrincipal",
+        "ultimoNumeroAto",
+        "historicoAtos",
+        "historicoTexto",
+        "redacao",
+        "observacoes",
+        "criadoEm",
+        "atualizadoEm",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -286,6 +355,12 @@
         "$ref": "#/entities/BuildingNotificationRecord"
       },
       "description": "Processos e notificações de edificações particionados por usuário e ano de exercício."
+    },
+    "/users/{userId}/fiscalizacoes/{fiscalizacaoId}": {
+      "schema": {
+        "$ref": "#/entities/FiscalizacaoRecord"
+      },
+      "description": "Registros de notificações, autos de infração, interdições e TACs de fiscalização do 10º GBM."
     }
   }
 }

@@ -2,9 +2,9 @@
 
 ## 1. Data Invariants (Invariantes de Dados)
 1. **Autenticação e E-mail Verificado:** Nenhuma operação de leitura ou escrita em `/users/**` é permitida sem `request.auth != null` e `request.auth.token.email_verified == true`.
-2. **Isolamento de PII e Propriedade:** Documentos em `/users/{userId}`, `/users/{userId}/years/{yearId}` e `/users/{userId}/years/{yearId}/notifications/{notificationId}` contêm PII (`email`, `cpfOuCnpj`, `telefone`, `endereco`). Somente o proprietário (`request.auth.uid == userId`) ou o administrador autenticado (`sst10gbm@gmail.com` com `email_verified == true` ou documento em `/admins/{uid}`) podem ler ou gravar.
+2. **Isolamento de PII e Propriedade:** Documentos em `/users/{userId}`, `/users/{userId}/years/{yearId}`, `/users/{userId}/years/{yearId}/notifications/{notificationId}` e `/users/{userId}/fiscalizacoes/{fiscalizacaoId}` contêm PII (`email`, `cpfOuCnpj`, `documentoCpfCnpj`, `telefone`, `endereco`). Somente o proprietário (`request.auth.uid == userId`) ou o administrador autenticado (`sst10gbm@gmail.com` com `email_verified == true` ou documento em `/admins/{uid}`) podem ler ou gravar.
 3. **Integridade Relacional (Master Gate):**
-   - Um exercício anual em `/users/{userId}/years/{yearId}` não pode existir sem o documento pai `/users/{userId}` (`exists` ou `existsAfter` em lote).
+   - Um exercício anual em `/users/{userId}/years/{yearId}` e uma fiscalização em `/users/{userId}/fiscalizacoes/{fiscalizacaoId}` não podem existir sem o documento pai `/users/{userId}` (`exists` ou `existsAfter` em lote).
    - Uma notificação em `/users/{userId}/years/{yearId}/notifications/{notificationId}` não pode existir sem o documento pai `/users/{userId}/years/{yearId}` (`exists` ou `existsAfter` em lote).
    - O campo `ownerUid` deve corresponder exatamente a `userId` e `request.auth.uid`, e `anoExercicio` deve corresponder exatamente a `yearId`.
 4. **Imutabilidade e Integridade Temporal:**

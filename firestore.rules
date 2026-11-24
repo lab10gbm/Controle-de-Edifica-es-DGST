@@ -58,6 +58,19 @@ service cloud.firestore {
       );
     }
 
+    function isValidFiscalizacaoStatus(val) {
+      return val is string && val.size() >= 6 && val.size() <= 60 && val in [
+        'Notificação',
+        '1º Auto de Infração',
+        '2º Auto de Infração',
+        'Auto de Interdição por Inércia',
+        'Auto de Interdição por Perigo iminente',
+        'TAC em Andamento',
+        'Encerrado',
+        'Cancelado'
+      ];
+    }
+
     // -------------------------------------------------------------------------
     // Validadores Estritos de Entidades
     // -------------------------------------------------------------------------
@@ -182,6 +195,45 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidFiscalizacao(data, userId, fiscalizacaoId) {
+      return data.keys().size() == 24
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'codigo', 'edificacao', 'documentoCpfCnpj',
+          'enderecoCompleto', 'municipio', 'processoVinculado', 'status',
+          'dataExpedicao', 'dataValidade', 'anoExpedicao', 'rgFiscal',
+          'fiscalResponsavel', 'orgaoPrincipal', 'ultimoNumeroAto',
+          'historicoAtos', 'historicoTexto', 'redacao', 'observacoes',
+          'criadoEm', 'atualizadoEm', 'createdAt', 'updatedAt'
+        ])
+        && data.id == fiscalizacaoId
+        && data.ownerUid == userId
+        && data.ownerUid == request.auth.uid
+        && data.codigo is number && data.codigo >= 0
+        && data.edificacao is string && data.edificacao.size() <= 300
+        && data.documentoCpfCnpj is string && data.documentoCpfCnpj.size() <= 40
+        && data.enderecoCompleto is string && data.enderecoCompleto.size() <= 400
+        && data.municipio is string && data.municipio.size() <= 120
+        && data.processoVinculado is string && data.processoVinculado.size() <= 120
+        && isValidFiscalizacaoStatus(data.status)
+        && data.dataExpedicao is string && data.dataExpedicao.size() <= 40
+        && data.dataValidade is string && data.dataValidade.size() <= 40
+        && data.anoExpedicao is string && data.anoExpedicao.size() <= 4
+        && data.rgFiscal is string && data.rgFiscal.size() <= 40
+        && data.fiscalResponsavel is string && data.fiscalResponsavel.size() <= 160
+        && data.orgaoPrincipal is string && data.orgaoPrincipal.size() <= 40
+        && data.ultimoNumeroAto is string && data.ultimoNumeroAto.size() <= 40
+        && data.historicoAtos is list
+        && data.historicoAtos.size() <= 50
+        && (data.historicoAtos.size() == 0 || data.historicoAtos[0] is map)
+        && data.historicoTexto is string && data.historicoTexto.size() <= 2000
+        && data.redacao is string && data.redacao.size() <= 4000
+        && data.observacoes is string && data.observacoes.size() <= 2000
+        && data.criadoEm is string && data.criadoEm.size() <= 64
+        && data.atualizadoEm is string && data.atualizadoEm.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // -------------------------------------------------------------------------
     // Documento de verificação de conectividade inicial (somente leitura pontual)
     // -------------------------------------------------------------------------
@@ -226,6 +278,53 @@ service cloud.firestore {
         );
 
       allow delete: if false;
+
+      // Módulo de Notificações / Fiscalização (DGST - 10º GBM)
+      match /fiscalizacoes/{fiscalizacaoId} {
+        allow get: if isValidId(userId) && isValidId(fiscalizacaoId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+
+        allow create: if isValidId(userId)
+          && isValidId(fiscalizacaoId)
+          && isOwner(userId)
+          && isValidFiscalizacao(incoming(), userId, fiscalizacaoId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isValidId(userId)
+          && isValidId(fiscalizacaoId)
+          && isValidFiscalizacao(incoming(), userId, fiscalizacaoId)
+          && incoming().id == existing().id
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin()
+            || (
+              isOwner(userId)
+              && existing().status != 'Encerrado'
+              && existing().status != 'Cancelado'
+              && (
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'status', 'historicoAtos', 'historicoTexto', 'orgaoPrincipal',
+                  'ultimoNumeroAto', 'observacoes', 'atualizadoEm', 'updatedAt'
+                ])
+                || incoming().diff(existing()).affectedKeys().hasOnly([
+                  'codigo', 'edificacao', 'documentoCpfCnpj', 'enderecoCompleto',
+                  'municipio', 'processoVinculado', 'status', 'dataExpedicao',
+                  'dataValidade', 'anoExpedicao', 'rgFiscal', 'fiscalResponsavel',
+                  'orgaoPrincipal', 'ultimoNumeroAto', 'historicoAtos', 'historicoTexto',
+                  'redacao', 'observacoes', 'atualizadoEm', 'updatedAt'
+                ])
+              )
+            )
+          );
+
+        allow delete: if isValidId(userId)
+          && isValidId(fiscalizacaoId)
+          && (isOwner(userId) || isAdmin());
+      }
 
       // Contêiner de Exercício Anual (ex: 2026, 2027)
       match /years/{yearId} {

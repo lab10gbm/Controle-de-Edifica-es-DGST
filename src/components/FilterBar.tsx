@@ -13,10 +13,11 @@ import {
   UploadCloud,
   Trash2,
   BarChart3,
-  RefreshCw
+  RefreshCw,
+  MapPin
 } from 'lucide-react';
 import { FilterState, ExpirationFilter } from '../types';
-import { OBM_LIST, STATUS_LIST } from '../data/initialData';
+import { LOCALIZACAO_LIST, OBM_LIST, STATUS_LIST } from '../data/initialData';
 
 interface FilterBarProps {
   filters: FilterState;
@@ -29,6 +30,7 @@ interface FilterBarProps {
   onExportCSV: () => void;
   totalFilteredCount: number;
   totalRecords?: number;
+  locationOptions?: string[];
   onClearAllData?: () => void;
   onOpenReports?: () => void;
 }
@@ -44,9 +46,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onExportCSV,
   totalFilteredCount,
   totalRecords,
+  locationOptions,
   onClearAllData,
   onOpenReports,
 }) => {
+  const effectiveLocations = locationOptions && locationOptions.length > 0 ? locationOptions : LOCALIZACAO_LIST;
   const handleInputChange = (field: keyof FilterState, value: any) => {
     setFilters((prev) => ({ ...prev, [field]: value }));
   };
@@ -169,7 +173,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
       {/* Structured Filters Controls Grid */}
       <div className="p-4 sm:p-5 bg-white">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           {/* Período: Data Inicial */}
           <div>
             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-1.5">
@@ -238,6 +242,26 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </select>
           </div>
 
+          {/* Seleção de Localização */}
+          <div>
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-1.5">
+              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+              Localização
+            </label>
+            <select
+              value={filters.localizacao || ''}
+              onChange={(e) => handleInputChange('localizacao', e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs bg-slate-50/50 border border-slate-300 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-red-600 focus:border-red-600 text-slate-800 font-medium"
+            >
+              <option value="">Todas as Localizações</option>
+              {effectiveLocations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Filtro de Vencimento / Trâmite */}
           <div>
             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-1.5">
@@ -296,7 +320,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             <span>
               Exibindo <strong className="text-slate-800 font-semibold">{totalFilteredCount}</strong> registro(s) correspondente(s)
             </span>
-            {(filters.termoBusca || filters.dataInicial || filters.dataFinal || filters.obm || filters.status || filters.vencimento !== 'todos') && (
+            {(filters.termoBusca || filters.dataInicial || filters.dataFinal || filters.obm || filters.status || filters.localizacao || filters.vencimento !== 'todos') && (
               <span className="text-[11px] bg-red-50 text-red-700 font-medium px-2 py-0.5 rounded border border-red-200/60">
                 Filtros ativos
               </span>

@@ -12,7 +12,8 @@ import { DgstSyncModal } from './components/DgstSyncModal';
 import { StatisticalReportDashboard } from './components/StatisticalReportDashboard';
 import { AuthGate } from './components/AuthGate';
 import { ToastContainer, ToastMessage } from './components/Toast';
-import { exportToCSV, calcularPrazoProcesso, formatCpfCnpj, extractProcessoNumero, formatProcesso, formatProcessoNumeroAno, adicionarDiasAData } from './utils/helpers';
+import { LOCALIZACAO_LIST } from './data/initialData';
+import { exportToCSV, calcularPrazoProcesso, formatCpfCnpj, extractProcessoNumero, parseProcessoE27, formatProcesso, formatProcessoNumeroAno, adicionarDiasAData } from './utils/helpers';
 import {
   cleanProcessLinkValue,
   computeLinkBackfillUpdates,
@@ -41,26 +42,39 @@ import {
   Loader2,
   BarChart3,
   Layers,
+  FileWarning,
 } from 'lucide-react';
+import { FiscalizacaoRecord } from './types/fiscalizacao';
+import { FiscalizacoesWorkspace } from './components/fiscalizacao/FiscalizacoesWorkspace';
+import {
+  batchImportFiscalizacoesToFirestore,
+  clearAllFiscalizacoesInFirestore,
+  deleteFiscalizacaoFromFirestore,
+  saveFiscalizacaoToFirestore,
+  subscribeToFiscalizacoes,
+} from './services/firestoreFiscalizacoes';
 
 const STORAGE_KEY = 'cbmerj_sst_notificacoes_v8_clean';
 
-const getUrgencyPriority = (item: BuildingNotification) => {
-  const prazo = calcularPrazoProcesso(item);
-
-  if (prazo.hasDataPronto || prazo.isConcluido) {
-    return 3;
+const normalizeLocationFilterValue = (loc?: string): string => {
+  const clean = (loc || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ');
+  if (!clean || clean === 'PROTOCOLO') return 'PROTOCOLO';
+  if (clean === 'PASTA INTERNET' || clean === 'PRANCHETA' || clean === 'INTERNET') return 'INTERNET';
+  if (
+    clean === 'CX AUTORIZACOES' ||
+    clean === 'CX DE AUTORIZACOES' ||
+    clean === 'CAIXA AUTORIZACOES' ||
+    clean === 'CAIXA DE AUTORIZACOES'
+  ) {
+    return 'CX AUTORIZAÇÕES';
   }
-
-  if (prazo.isVencido) {
-    return 0;
-  }
-
-  if (prazo.diasRestantes !== null && prazo.diasRestantes <= 5) {
-    return 1;
-  }
-
-  return 2;
+  if (clean === 'DIR. DIVISAO' || clean === 'DIR DIVISAO') return 'DIR. DIVISÃO';
+  return clean;
 };
 
 export default function App() {
@@ -81,6 +95,11 @@ export default function App() {
   // Cloud Notifications State
   const [notifications, setNotifications] = useState<BuildingNotification[]>([]);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  // Fiscalizações / Notificações State (Módulo independente)
+  const [fiscalizacoes, setFiscalizacoes] = useState<FiscalizacaoRecord[]>([]);
+  const [isFiscalizacoesLoading, setIsFiscalizacoesLoading] = useState<boolean>(false);
+  const [hasActivatedNotificacoesTab, setHasActivatedNotificacoesTab] = useState<boolean>(false);
 
   // Legacy localStorage detection for one-click cloud migration
   const [legacyLocalRecords, setLegacyLocalRecords] = useState<BuildingNotification[]>(() => {
@@ -132,6 +151,8 @@ export default function App() {
       } else {
         setNotifications([]);
         setRemoteYears([]);
+        setFiscalizacoes([]);
+        setHasActivatedNotificacoesTab(false);
       }
     });
 
@@ -403,6 +424,7 @@ export default function App() {
     dataFinal: '',
     obm: '',
     status: '',
+    localizacao: '',
     vencimento: 'todos',
     ordenacaoCampo: 'numero',
     ordenacaoDirecao: 'asc',
@@ -412,8 +434,33 @@ export default function App() {
 
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
 
-  // Active Workspace View ('listagem' | 'relatorios')
-  const [activeView, setActiveView] = useState<'listagem' | 'relatorios'>('listagem');
+  // Active Workspace View ('listagem' | 'relatorios' | 'notificacoes')
+  const [activeView, setActiveView] = useState<'listagem' | 'relatorios' | 'notificacoes'>('listagem');
+
+  // Lazy-live subscription para Fiscalizações / Notificações (economiza cota Spark quando não acessado)
+  useEffect(() => {
+    if (activeView === 'notificacoes' && !hasActivatedNotificacoesTab) {
+      setHasActivatedNotificacoesTab(true);
+    }
+  }, [activeView, hasActivatedNotificacoesTab]);
+
+  useEffect(() => {
+    if (!authReady || !user || !hasActivatedNotificacoesTab) return;
+    setIsFiscalizacoesLoading(true);
+    let unsub: Unsubscribe | undefined;
+    try {
+      unsub = subscribeToFiscalizacoes(user.uid, (items) => {
+        setFiscalizacoes(items);
+        setIsFiscalizacoesLoading(false);
+      });
+    } catch (err) {
+      setIsFiscalizacoesLoading(false);
+      setFatalError(err instanceof Error ? err : new Error(String(err)));
+    }
+    return () => {
+      unsub?.();
+    };
+  }, [authReady, user, hasActivatedNotificacoesTab]);
 
   // Modals & Print State
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -442,6 +489,21 @@ export default function App() {
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // Opções disponíveis no filtro de Localização (padrões + eventuais extras presentes no banco)
+  const availableLocations = useMemo(() => {
+    const result: string[] = [...LOCALIZACAO_LIST];
+    const seen = new Set(LOCALIZACAO_LIST.map((l) => normalizeLocationFilterValue(l)));
+    for (const item of notifications) {
+      const raw = (item.detalhesSST?.localizacao || '').trim();
+      const norm = normalizeLocationFilterValue(raw);
+      if (norm && !seen.has(norm)) {
+        seen.add(norm);
+        result.push(raw.toUpperCase());
+      }
+    }
+    return result;
+  }, [notifications]);
 
   // Next sequential number for new records
   const nextNumber = useMemo(() => {
@@ -538,6 +600,14 @@ export default function App() {
           return false;
         }
 
+        if (filters.localizacao) {
+          const targetLoc = normalizeLocationFilterValue(filters.localizacao);
+          const itemLoc = normalizeLocationFilterValue(item.detalhesSST?.localizacao);
+          if (itemLoc !== targetLoc) {
+            return false;
+          }
+        }
+
         const entrada = item.dataEntrada || item.dataExpedicao;
         if (filters.dataInicial && entrada < filters.dataInicial) {
           return false;
@@ -566,20 +636,39 @@ export default function App() {
         return true;
       })
       .sort((a, b) => {
-        const urgA = getUrgencyPriority(a);
-        const urgB = getUrgencyPriority(b);
+        const dir = filters.ordenacaoDirecao === 'asc' ? 1 : -1;
 
-        if (urgA !== urgB) {
-          return urgA - urgB;
+        if (filters.ordenacaoCampo === 'numero') {
+          const parsedA = parseProcessoE27(a.processo !== undefined ? a.processo : a.numero);
+          const parsedB = parseProcessoE27(b.processo !== undefined ? b.processo : b.numero);
+          const numA = parsedA?.numero || (a.numero > 0 ? a.numero : extractProcessoNumero(a.processo));
+          const numB = parsedB?.numero || (b.numero > 0 ? b.numero : extractProcessoNumero(b.processo));
+          const anoA =
+            parseInt(
+              parsedA?.ano ||
+                a.anoExercicio ||
+                (a.dataEntrada || a.dataExpedicao || '').match(/\b(20\d{2}|19\d{2})\b/)?.[1] ||
+                '2026',
+              10
+            ) || 2026;
+          const anoB =
+            parseInt(
+              parsedB?.ano ||
+                b.anoExercicio ||
+                (b.dataEntrada || b.dataExpedicao || '').match(/\b(20\d{2}|19\d{2})\b/)?.[1] ||
+                '2026',
+              10
+            ) || 2026;
+
+          if (anoA !== anoB) return (anoA - anoB) * dir;
+          if (numA !== numB) return (numA - numB) * dir;
+          return 0;
         }
 
         let valA: any = a[filters.ordenacaoCampo];
         let valB: any = b[filters.ordenacaoCampo];
 
-        if (filters.ordenacaoCampo === 'numero') {
-          valA = a.numero > 0 ? a.numero : extractProcessoNumero(a.processo);
-          valB = b.numero > 0 ? b.numero : extractProcessoNumero(b.processo);
-        } else if (filters.ordenacaoCampo === 'edificacao') {
+        if (filters.ordenacaoCampo === 'edificacao') {
           valA = (a.requerente || a.edificacao).toLowerCase();
           valB = (b.requerente || b.edificacao).toLowerCase();
         } else if (filters.ordenacaoCampo === 'dataExpedicao') {
@@ -590,8 +679,8 @@ export default function App() {
           valB = calcularPrazoProcesso(b).dataLimiteISO || '9999-99-99';
         }
 
-        if (valA < valB) return filters.ordenacaoDirecao === 'asc' ? -1 : 1;
-        if (valA > valB) return filters.ordenacaoDirecao === 'asc' ? 1 : -1;
+        if (valA < valB) return -1 * dir;
+        if (valA > valB) return 1 * dir;
         return 0;
       });
   }, [notifications, filters]);
@@ -996,8 +1085,8 @@ export default function App() {
           onSignOut={handleSignOut}
           selectedYear={selectedYear}
           availableYears={availableYears}
-          onSelectYear={setSelectedYear}
-          isSyncing={isSyncing}
+          onSelectYear={activeView !== 'notificacoes' ? setSelectedYear : undefined}
+          isSyncing={isSyncing || isFiscalizacoesLoading}
         />
       </div>
 
@@ -1005,7 +1094,7 @@ export default function App() {
       <main className="flex-1 max-w-[1680px] w-full mx-auto px-4 sm:px-6 py-6 space-y-5 print:p-0 print:max-w-none">
         {/* Segmented Workspace Switcher */}
         <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-          <div className="inline-flex items-center gap-1 p-1 bg-white border border-slate-200 rounded-xl shadow-2xs">
+          <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-white border border-slate-200 rounded-xl shadow-2xs">
             <button
               type="button"
               onClick={() => setActiveView('listagem')}
@@ -1029,6 +1118,29 @@ export default function App() {
             >
               <BarChart3 className="w-4 h-4" />
               <span>Gráficos e Relatórios Estatísticos</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveView('notificacoes')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'notificacoes'
+                  ? 'bg-amber-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <FileWarning className="w-4 h-4" />
+              <span>Fiscalizações</span>
+              {fiscalizacoes.length > 0 && (
+                <span
+                  className={`px-1.5 py-0.5 text-[10px] font-mono font-bold rounded ${
+                    activeView === 'notificacoes'
+                      ? 'bg-amber-800/70 text-white'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {fiscalizacoes.length}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -1095,6 +1207,7 @@ export default function App() {
               onExportCSV={handleExportCSV}
               totalFilteredCount={filteredNotifications.length}
               totalRecords={notifications.length}
+              locationOptions={availableLocations}
               onClearAllData={handleClearAllData}
               onOpenReports={() => setActiveView('relatorios')}
             />
@@ -1109,6 +1222,7 @@ export default function App() {
               onPrintSingle={handlePrintSingle}
               onResetFilters={handleResetFilters}
               onUpdateNotification={handleUpdateNotification}
+              selectedLocalizacao={filters.localizacao}
               onEnsureProcessVisible={(target) => {
                 const isVisible = filteredNotifications.some((n) => n.id === target.id);
                 if (!isVisible) {
@@ -1124,12 +1238,64 @@ export default function App() {
               onOpenNewRecordModal={handleOpenNewRecordModal}
             />
           </>
-        ) : (
+        ) : activeView === 'relatorios' ? (
           <StatisticalReportDashboard
             notifications={notifications}
             selectedYear={selectedYear}
             availableYears={availableYears}
             onEditRecord={handleEdit}
+          />
+        ) : (
+          <FiscalizacoesWorkspace
+            records={fiscalizacoes}
+            isLoading={isFiscalizacoesLoading}
+            onSaveRecord={async (rec, isEditing) => {
+              if (!user) return;
+              try {
+                await saveFiscalizacaoToFirestore(user.uid, rec, isEditing);
+                addToast(
+                  'success',
+                  isEditing ? 'Notificação atualizada!' : 'Notificação cadastrada!',
+                  `Registro #${String(rec.codigo).padStart(4, '0')} (${rec.edificacao}) salvo no Firestore.`
+                );
+              } catch (err) {
+                setFatalError(err instanceof Error ? err : new Error(String(err)));
+              }
+            }}
+            onDeleteRecord={async (recId) => {
+              if (!user) return;
+              try {
+                await deleteFiscalizacaoFromFirestore(user.uid, recId);
+              } catch (err) {
+                setFatalError(err instanceof Error ? err : new Error(String(err)));
+              }
+            }}
+            onBatchImport={async (items, replaceExisting, onProgress) => {
+              if (!user) return 0;
+              try {
+                const existingIds = new Set(fiscalizacoes.map((f) => f.id));
+                return await batchImportFiscalizacoesToFirestore(
+                  user.uid,
+                  items,
+                  replaceExisting,
+                  existingIds,
+                  onProgress
+                );
+              } catch (err) {
+                setFatalError(err instanceof Error ? err : new Error(String(err)));
+                return 0;
+              }
+            }}
+            onClearAll={async () => {
+              if (!user) return 0;
+              try {
+                return await clearAllFiscalizacoesInFirestore(user.uid);
+              } catch (err) {
+                setFatalError(err instanceof Error ? err : new Error(String(err)));
+                return 0;
+              }
+            }}
+            onNotify={addToast}
           />
         )}
       </main>
@@ -1145,17 +1311,19 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4 text-slate-500">
             <span>SST - 10º GBM (Angra dos Reis)</span>
-            <span>·</span>
-            {notifications.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClearAllData}
-                className="text-rose-600 hover:text-rose-800 font-semibold underline inline-flex items-center gap-1 cursor-pointer"
-                title="Excluir todos os registros cadastrados da plataforma"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Excluir Todos os Registros</span>
-              </button>
+            {activeView !== 'notificacoes' && notifications.length > 0 && (
+              <>
+                <span>·</span>
+                <button
+                  type="button"
+                  onClick={handleClearAllData}
+                  className="text-rose-600 hover:text-rose-800 font-semibold underline inline-flex items-center gap-1 cursor-pointer"
+                  title="Excluir todos os registros cadastrados da plataforma"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Excluir Todos os Registros</span>
+                </button>
+              </>
             )}
           </div>
         </div>
