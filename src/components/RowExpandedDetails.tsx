@@ -7,11 +7,13 @@ import {
 import { 
   formatDateBR, 
   formatProcesso,
+  formatProcessoNumeroAno,
   formatCpfCnpj,
   isExpired, 
   getDaysRemaining,
   calcularPrazoProcesso 
 } from '../utils/helpers';
+import { cleanProcessLinkValue, ProcessLinkInfo } from '../utils/processLinks';
 import { 
   User, 
   Clock, 
@@ -33,7 +35,10 @@ import {
   Tag,
   Layers,
   ChevronRight,
-  Send
+  Send,
+  Link2,
+  ArrowRight,
+  CornerDownRight
 } from 'lucide-react';
 
 interface RowExpandedDetailsProps {
@@ -42,6 +47,8 @@ interface RowExpandedDetailsProps {
   onAddQuickNote: (id: string, noteText: string, author: string) => void;
   onPrintSingle: (notification: BuildingNotification) => void;
   onUpdateNotification?: (notification: BuildingNotification) => void;
+  linkInfo?: ProcessLinkInfo;
+  onNavigateToProcess?: (target: BuildingNotification) => void;
 }
 
 export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
@@ -50,6 +57,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   onAddQuickNote,
   onPrintSingle,
   onUpdateNotification,
+  linkInfo,
+  onNavigateToProcess,
 }) => {
   const [activeTab, setActiveTab] = useState<'requerente' | 'tramite' | 'documentos' | 'historico'>('requerente');
   const [newNote, setNewNote] = useState('');
@@ -74,8 +83,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const diasUltimoBilheteVal = sst.diasUltimoBilhete !== undefined && sst.diasUltimoBilhete !== '' ? sst.diasUltimoBilhete : 0;
   const outrosBilhetesVal = sst.outrosBilhetes || '';
 
-  // Lista estruturada de bilhetes: prioriza sst.listaBilhetes ou deriva de 1º e último bilhete
-  const listaBilhetes: BilheteItem[] = (sst.listaBilhetes && sst.listaBilhetes.length > 0)
+  // Lista estruturada de bilhetes: prioriza sst.listaBilhetes ou deriva do 1º e último bilhete
+  const rawLista: BilheteItem[] = (sst.listaBilhetes && sst.listaBilhetes.length > 0)
     ? sst.listaBilhetes
     : [
         ...(dataBilheteFmt !== '-' ? [{
@@ -83,10 +92,10 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           ordem: 1,
           tipo: 'primeiro' as const,
           tipoDetalhe: 'BILHETE' as const,
-          rotulo: '1º Bilhete (Data do Bilhete)',
+          rotulo: '1º Bilhete',
           data: dataBilheteFmt,
           dias: diasBilheteVal,
-          statusOuParecer: outrosBilhetesVal || 'Registrado',
+          statusOuParecer: 'BILHETE 1',
           despacho: `Primeiro bilhete lançado com ${diasBilheteVal} dia(s) decorridos.`,
           autor: 'Fiscal SST 10º GBM'
         }] : []),
@@ -95,14 +104,40 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           ordem: 2,
           tipo: 'ultimo' as const,
           tipoDetalhe: 'RETORNO' as const,
-          rotulo: 'Último Bilhete (Data do Último Bilhete)',
+          rotulo: 'Último Bilhete',
           data: ultimoBilheteFmt,
           dias: diasUltimoBilheteVal,
-          statusOuParecer: outrosBilhetesVal || 'Concluído',
-          despacho: `Último bilhete registrado com ${diasUltimoBilheteVal} dia(s) decorridos.`,
+          statusOuParecer: outrosBilhetesVal || 'Último Bilhete',
+          despacho: outrosBilhetesVal ? `Parecer: ${outrosBilhetesVal}` : `Último bilhete registrado com ${diasUltimoBilheteVal} dia(s) decorridos.`,
           autor: 'Fiscal SST 10º GBM'
         }] : [])
       ];
+
+  // Garante que o 1º Bilhete (ordem 1 / tipo primeiro) tenha sempre a situação própria (BILHETE 1)
+  // e não copie erroneamente a situação da coluna OUTROS BILHETES (ex: BILHETE 3, RETORNO, GERADO DI)
+  const listaBilhetes: BilheteItem[] = rawLista.map((b, idx) => {
+    if (idx === 0 || b.tipo === 'primeiro' || b.ordem === 1) {
+      const isCopiadoErrado = b.statusOuParecer && b.statusOuParecer === outrosBilhetesVal && outrosBilhetesVal.toUpperCase() !== 'BILHETE 1';
+      const statusPrimeiro = (!b.statusOuParecer || isCopiadoErrado) ? 'BILHETE 1' : b.statusOuParecer;
+      return {
+        ...b,
+        rotulo: b.rotulo || '1º Bilhete',
+        statusOuParecer: statusPrimeiro,
+        despacho: (b.despacho && !b.despacho.includes(outrosBilhetesVal))
+          ? b.despacho
+          : `Primeiro bilhete lançado com ${b.dias || 0} dia(s) decorridos.`
+      };
+    }
+    if ((idx === rawLista.length - 1 || b.tipo === 'ultimo') && (!b.statusOuParecer || b.statusOuParecer === 'Concluído')) {
+      return {
+        ...b,
+        rotulo: b.rotulo || 'Último Bilhete',
+        statusOuParecer: outrosBilhetesVal || b.statusOuParecer || 'Último Bilhete',
+        despacho: outrosBilhetesVal ? `Parecer: ${outrosBilhetesVal}` : b.despacho
+      };
+    }
+    return b;
+  });
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -184,7 +219,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs font-bold px-2.5 py-1 bg-blue-900 text-white rounded shadow-2xs">
-              PROCESSO Nº {formatProcesso(notification.processo !== undefined ? notification.processo : notification.numero)}
+              PROCESSO Nº {formatProcesso(notification.processo !== undefined ? notification.processo : notification.numero, { codigo: notification.detalhesSST?.codigo, ano: notification.anoExercicio })}
             </span>
             <span className="text-xs text-slate-700 font-medium">
               {notification.tipoProcesso || notification.tipoDocumento} – <strong className="text-slate-900">{notification.origem || notification.obm}</strong>
@@ -200,7 +235,19 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
 
           {/* Badge de Prazos */}
           <div className="flex items-center gap-1.5 text-xs font-medium">
-            {prazoInfo.isConcluido ? (
+            {prazoInfo.hasDataPronto ? (
+              prazoInfo.concluidoNoPrazo ? (
+                <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded font-bold border border-emerald-200">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  Pronto no Prazo Legal · Data do Pronto: {prazoInfo.dataProntoBR} (Limite: {prazoInfo.dataLimiteBR})
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded font-bold border border-amber-300">
+                  <Clock className="w-3.5 h-3.5 text-amber-700" />
+                  Pronto com Atraso ({prazoInfo.diasEmAtraso}d após prazo limite) · Data do Pronto: {prazoInfo.dataProntoBR}
+                </span>
+              )
+            ) : prazoInfo.isConcluido ? (
               <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded font-bold border border-emerald-200">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                 Concluído / Entregue (Prazo: {prazoInfo.diasPrazo} dias)
@@ -302,18 +349,133 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
         </div>
       </div>
 
+      {/* Cadeia Visual de Continuidade entre Processos */}
+      {linkInfo?.hasAnyLink && (
+        <div className="mt-3 p-3 bg-white rounded-xl border border-blue-200/80 shadow-2xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 uppercase tracking-wider">
+              <Link2 className="w-3.5 h-3.5 text-blue-700" />
+              <span>Cadeia de Continuidade do Processo</span>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              Clique em qualquer processo vinculado para navegar diretamente até ele
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {(() => {
+              const root = linkInfo.chain[0];
+              const rootAnt = cleanProcessLinkValue(root?.detalhesSST?.processoAntigo);
+              const rootDocAnt = cleanProcessLinkValue(root?.detalhesSST?.numDocAntigo);
+              const showRootExternal =
+                linkInfo.chain.length > 0 &&
+                rootAnt &&
+                linkInfo.chain.length === 1 &&
+                linkInfo.externalPrevRef;
+              const externalToRender = showRootExternal
+                ? linkInfo.externalPrevRef
+                : linkInfo.prevLinks.length === 0 && linkInfo.externalPrevRef
+                ? linkInfo.externalPrevRef
+                : rootAnt && !linkInfo.chain.some((c) => {
+                    const numStr = String(c.numero);
+                    return rootAnt.startsWith(numStr);
+                  })
+                ? { processo: rootAnt, doc: rootDocAnt || undefined }
+                : null;
+
+              if (!externalToRender) return null;
+              return (
+                <>
+                  <div className="px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600 flex flex-col">
+                    <span className="text-[10px] font-semibold uppercase text-slate-400">Histórico Anterior</span>
+                    <span className="font-mono font-bold text-slate-700">
+                      {externalToRender.processo}
+                      {externalToRender.doc ? ` · ${externalToRender.doc}` : ''}
+                    </span>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+                </>
+              );
+            })()}
+
+            {linkInfo.chain.map((step, idx) => {
+              const isCurrent = step.id === notification.id;
+              const stepNumAno = formatProcessoNumeroAno(
+                step.processo !== undefined ? step.processo : step.numero,
+                { ano: step.anoExercicio, dataRef: step.dataEntrada || step.dataExpedicao }
+              );
+              const stepStatus = cleanProcessLinkValue(step.detalhesSST?.situacao || step.status) || 'EM ANÁLISE';
+              const stepDoc = cleanProcessLinkValue(step.detalhesSST?.docGerado);
+              const stepLoc = cleanProcessLinkValue(step.detalhesSST?.localizacao);
+
+              return (
+                <React.Fragment key={step.id}>
+                  {idx > 0 && <ArrowRight className="w-4 h-4 text-blue-500 shrink-0" />}
+                  {isCurrent ? (
+                    <div className="px-3 py-1.5 rounded-lg border border-blue-900 bg-blue-900 text-white shadow-xs flex flex-col">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-200">
+                          Atual
+                        </span>
+                        <span className="font-mono font-bold">{stepNumAno}</span>
+                      </div>
+                      <span className="text-[10.5px] text-blue-100 mt-0.5">
+                        {stepStatus}
+                        {stepDoc ? ` · ${stepDoc}` : ''}
+                        {stepLoc ? ` · ${stepLoc}` : ''}
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToProcess?.(step)}
+                      title={`Abrir processo ${stepNumAno} — ${step.requerente || step.edificacao}`}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-blue-50 hover:border-blue-400 text-slate-800 hover:text-blue-950 transition-colors text-left cursor-pointer flex flex-col"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-blue-800">{stepNumAno}</span>
+                        {stepDoc && (
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-700">
+                            {stepDoc}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10.5px] text-slate-600 mt-0.5">
+                        {stepStatus}
+                        {stepLoc ? ` · ${stepLoc}` : ''}
+                      </span>
+                    </button>
+                  )}
+                </React.Fragment>
+              );
+            })}
+
+            {linkInfo.nextLinks.length === 0 && linkInfo.externalNextRef && (
+              <>
+                <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+                <div className="px-2.5 py-1.5 rounded-lg border border-dashed border-blue-200 bg-blue-50/40 text-blue-800 flex flex-col">
+                  <span className="text-[10px] font-semibold uppercase text-blue-600">Próximo Indicado</span>
+                  <span className="font-mono font-bold">{linkInfo.externalNextRef}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Tab Content Panel */}
       <div className="pt-4">
         {activeTab === 'requerente' && (
-          <div className="max-w-xl">
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-3.5 text-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                <h4 className="font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Card 1: Requerente & Identificação */}
+            <div className="bg-white p-4.5 rounded-xl border border-slate-200 shadow-2xs space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   <User className="w-4 h-4 text-blue-600" />
-                  <span>Dados do Requerente</span>
+                  <span>Identificação do Requerente</span>
                 </h4>
-                <span className="font-mono text-[11px] text-slate-500 font-semibold bg-slate-100 px-2 py-0.5 rounded">
-                  Processo nº {formatProcesso(notification.processo !== undefined ? notification.processo : notification.numero)}
+                <span className="font-mono text-[11px] text-slate-600 font-bold bg-slate-100 px-2 py-0.5 rounded">
+                  Nº {formatProcesso(notification.processo !== undefined ? notification.processo : notification.numero, { codigo: notification.detalhesSST?.codigo, ano: notification.anoExercicio })}
                 </span>
               </div>
 
@@ -328,9 +490,9 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 <span className="text-slate-500 block text-[11px] font-medium">CPF / CNPJ:</span>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="font-mono text-slate-900 font-bold text-xs">
-                    {formatCpfCnpj(notification.proprietario.cpfOuCnpj) || 'Não informado'}
+                    {formatCpfCnpj(notification.proprietario?.cpfOuCnpj) || 'Não informado'}
                   </span>
-                  {notification.proprietario.cpfOuCnpj && (
+                  {notification.proprietario?.cpfOuCnpj && (
                     <button
                       type="button"
                       onClick={() => copyToClipboard(notification.proprietario.cpfOuCnpj, 'cpf-req')}
@@ -349,6 +511,129 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   {notification.origem || notification.obm || 'Não informado'}
                 </strong>
               </div>
+
+              <div className="pt-1.5 border-t border-slate-100">
+                <span className="text-slate-500 block text-[11px] font-medium">Contato / Telefone:</span>
+                <span className="text-slate-800 font-medium">
+                  {notification.proprietario?.telefone || notification.proprietario?.email || 'Não cadastrado'}
+                </span>
+              </div>
+            </div>
+
+            {/* Card 2: Endereço & Localização */}
+            <div className="bg-white p-4.5 rounded-xl border border-slate-200 shadow-2xs space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <FolderOpen className="w-4 h-4 text-emerald-600" />
+                  <span>Endereço do Imóvel</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => onEdit(notification)}
+                  className="text-[11px] text-blue-700 hover:underline font-semibold cursor-pointer"
+                >
+                  Editar
+                </button>
+              </div>
+
+              {notification.endereco?.logradouro ? (
+                <>
+                  <div>
+                    <span className="text-slate-500 block text-[11px] font-medium">Logradouro / Número:</span>
+                    <strong className="text-xs font-bold text-slate-900 block mt-0.5">
+                      {notification.endereco.logradouro}{notification.endereco.numero ? `, ${notification.endereco.numero}` : ''}
+                      {notification.endereco.complemento ? ` (${notification.endereco.complemento})` : ''}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-500 block text-[11px] font-medium">Bairro / Município:</span>
+                    <span className="text-slate-800 font-medium block mt-0.5">
+                      {notification.endereco.bairro ? `${notification.endereco.bairro} - ` : ''}{notification.endereco.municipio || notification.origem || 'RJ'}
+                    </span>
+                  </div>
+
+                  {notification.endereco.cep && (
+                    <div>
+                      <span className="text-slate-500 block text-[11px] font-medium">CEP:</span>
+                      <span className="text-slate-800 font-mono">{notification.endereco.cep}</span>
+                    </div>
+                  )}
+
+                  {notification.endereco.pontoReferencia && (
+                    <div>
+                      <span className="text-slate-500 block text-[11px] font-medium">Referência:</span>
+                      <span className="text-slate-700 italic">{notification.endereco.pontoReferencia}</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="py-4 text-center text-slate-400 space-y-2">
+                  <p className="italic">Nenhum endereço cadastrado para este processo.</p>
+                  <button
+                    type="button"
+                    onClick={() => onEdit(notification)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Adicionar Endereço</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Card 3: Fiscalização & Processo Administrativo */}
+            <div className="bg-white p-4.5 rounded-xl border border-slate-200 shadow-2xs space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-purple-600" />
+                  <span>Fiscalização & Processo Adm.</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => onEdit(notification)}
+                  className="text-[11px] text-blue-700 hover:underline font-semibold cursor-pointer"
+                >
+                  Editar
+                </button>
+              </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px] font-medium">Fiscal Responsável:</span>
+                <strong className="text-xs font-semibold text-slate-900 block mt-0.5">
+                  {notification.fiscalResponsavel || 'Não informado'}
+                </strong>
+                {notification.matriculaFiscal && (
+                  <span className="text-[11px] text-slate-500 font-mono block">Matrícula: {notification.matriculaFiscal}</span>
+                )}
+              </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px] font-medium">Proc. Administrativo CBMERJ:</span>
+                <span className="text-xs font-mono font-bold text-slate-900 block mt-0.5">
+                  {notification.processoAdministrativo || 'Não informado'}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px] font-medium">Exigências Registradas:</span>
+                {notification.exigencias && notification.exigencias.length > 0 ? (
+                  <ul className="mt-1 space-y-1 list-disc list-inside text-slate-700">
+                    {notification.exigencias.map((ex, idx) => (
+                      <li key={idx} className="truncate" title={ex}>{ex}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-slate-400 italic block mt-0.5">Nenhuma exigência cadastrada</span>
+                )}
+              </div>
+
+              {notification.observacoes && (
+                <div className="pt-1.5 border-t border-slate-100">
+                  <span className="text-slate-500 block text-[11px] font-medium">Observações:</span>
+                  <p className="text-slate-700 italic mt-0.5 line-clamp-2">{notification.observacoes}</p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -383,7 +668,15 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
                 <span className="text-[11px] font-semibold text-slate-500 block uppercase">Situação do Prazo</span>
                 <div className="flex items-baseline gap-1.5 mt-0.5">
-                  {prazoInfo.isConcluido ? (
+                  {prazoInfo.hasDataPronto ? (
+                    prazoInfo.concluidoNoPrazo ? (
+                      <span className="text-sm font-bold text-emerald-700">Pronto no Prazo</span>
+                    ) : (
+                      <span className="text-sm font-bold font-mono text-amber-800">
+                        Pronto ({prazoInfo.diasEmAtraso}d atraso)
+                      </span>
+                    )
+                  ) : prazoInfo.isConcluido ? (
                     <span className="text-base font-bold text-emerald-700">Concluído</span>
                   ) : prazoInfo.isVencido ? (
                     <span className="text-base font-bold font-mono text-rose-700">
@@ -396,7 +689,13 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   )}
                 </div>
                 <span className="text-[10px] text-slate-500 block mt-0.5">
-                  {prazoInfo.isConcluido ? 'Finalizado' : prazoInfo.isVencido ? 'Vencido' : 'No prazo legal'}
+                  {prazoInfo.hasDataPronto
+                    ? `Contagem parada em ${prazoInfo.dataProntoBR}`
+                    : prazoInfo.isConcluido
+                    ? 'Finalizado'
+                    : prazoInfo.isVencido
+                    ? 'Vencido em andamento'
+                    : 'No prazo legal'}
                 </span>
               </div>
 
@@ -446,8 +745,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[11px]">Ao Diretor:</span>
-                    <strong className="text-slate-900">{sst.aoDiretor || 'GERADO DI'}</strong>
-                    {sst.dataAoDiretor && (
+                    <strong className="text-slate-900">{sst.aoDiretor || '-'}</strong>
+                    {sst.dataAoDiretor && sst.dataAoDiretor !== sst.aoDiretor && (
                       <span className="text-[11px] text-slate-500 font-mono ml-1">({formatDateBR(sst.dataAoDiretor)})</span>
                     )}
                   </div>
@@ -464,12 +763,21 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[11px]">Previsão para o Pronto:</span>
-                    <strong className="text-slate-900 font-mono text-xs">{formatDateBR(sst.previsaoPronto || '13/01/2026')}</strong>
-                    <span className="text-[11px] text-slate-500 ml-1">({sst.diasPrevisao ?? 8} dias)</span>
+                    <strong className="text-slate-900 font-mono text-xs">{formatDateBR(sst.previsaoPronto)}</strong>
+                    {sst.diasPrevisao !== undefined && (
+                      <span className="text-[11px] text-slate-500 ml-1">({sst.diasPrevisao} dias)</span>
+                    )}
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[11px]">Data do Pronto:</span>
-                    <strong className="text-slate-900 font-mono text-xs">{formatDateBR(sst.dataPronto || '28/01/2026')}</strong>
+                    <span className="text-slate-500 block text-[11px]">Data do Pronto (Fim da contagem):</span>
+                    <strong className="text-slate-900 font-mono text-xs">
+                      {formatDateBR(sst.dataPronto)}
+                    </strong>
+                    {prazoInfo.hasDataPronto && (
+                      <span className={`text-[10.5px] ml-1 font-semibold ${prazoInfo.concluidoNoPrazo ? 'text-emerald-700' : 'text-amber-800'}`}>
+                        {prazoInfo.concluidoNoPrazo ? '(no prazo)' : `(${prazoInfo.diasEmAtraso}d atraso)`}
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex justify-between">
                     <span>Situação Técnica:</span>
@@ -486,19 +794,47 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[11px]">Doc. Gerado:</span>
-                    <strong className="text-blue-900 font-mono text-xs">{sst.docGerado || 'DI-1029'}</strong>
-                    <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1 py-0.2 ml-1 rounded font-bold border border-emerald-200">
-                      {sst.situacaoDocGerado || 'ENTREGUE'}
-                    </span>
+                    <strong className="text-blue-900 font-mono text-xs">{sst.docGerado || '-'}</strong>
+                    {sst.situacaoDocGerado && (
+                      <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1 py-0.2 ml-1 rounded font-bold border border-emerald-200">
+                        {sst.situacaoDocGerado}
+                      </span>
+                    )}
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[11px]">Data de Entrega:</span>
-                    <strong className="text-slate-900 font-mono text-xs">{formatDateBR(sst.dataEntregue || '15/01/2026')}</strong>
-                    <span className="text-[11px] text-slate-500 ml-1">({sst.diasEntrega ?? 2} dias)</span>
+                    <strong className="text-slate-900 font-mono text-xs">{formatDateBR(sst.dataEntregue)}</strong>
+                    {sst.diasEntrega !== undefined && (
+                      <span className="text-[11px] text-slate-500 ml-1">({sst.diasEntrega} dias)</span>
+                    )}
                   </div>
-                  <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex justify-between">
+                  <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between gap-2">
                     <span>Processo Seguinte:</span>
-                    <strong className="text-blue-800 font-mono">{sst.processoSeguinte || '2394'}</strong>
+                    {linkInfo && linkInfo.nextLinks.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {linkInfo.nextLinks.map((nx) => {
+                          const numAno = formatProcessoNumeroAno(nx.processo ?? nx.numero, {
+                            ano: nx.anoExercicio,
+                            dataRef: nx.dataEntrada || nx.dataExpedicao,
+                          });
+                          return (
+                            <button
+                              key={nx.id}
+                              type="button"
+                              onClick={() => onNavigateToProcess?.(nx)}
+                              className="inline-flex items-center gap-1 font-mono font-bold text-blue-800 hover:text-blue-950 underline cursor-pointer"
+                            >
+                              <span>{numAno}</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <strong className="text-blue-800 font-mono">
+                        {cleanProcessLinkValue(sst.processoSeguinte) || '-'}
+                      </strong>
+                    )}
                   </div>
                 </div>
               </div>
@@ -516,22 +852,22 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               <div>
                 <span className="text-slate-500 block">Doc. Gerado:</span>
                 <strong className="text-sm font-mono text-blue-900 block mt-0.5">
-                  {sst.docGerado || 'DI-1029'}
+                  {sst.docGerado && sst.docGerado !== '- - - -' && sst.docGerado !== '-' ? sst.docGerado : 'Não informado'}
                 </strong>
               </div>
               <div>
                 <span className="text-slate-500 block">Situação do Documento:</span>
-                <span className="inline-block mt-0.5 font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                  {sst.situacaoDocGerado || 'ENTREGUE'}
+                <span className="inline-block mt-0.5 font-bold text-slate-800 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
+                  {sst.situacaoDocGerado || 'Não informado'}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500 block">Gráfico / Identificador:</span>
-                <span className="font-mono text-slate-800 font-semibold">{sst.grafico || 'DI'}</span>
+                <span className="font-mono text-slate-800 font-semibold">{sst.grafico || '-'}</span>
               </div>
               <div>
                 <span className="text-slate-500 block">Código Interno SST:</span>
-                <span className="font-mono text-slate-800 font-semibold">{sst.codigo || '11220'}</span>
+                <span className="font-mono text-slate-800 font-semibold">{sst.codigo || '-'}</span>
               </div>
             </div>
 
@@ -542,19 +878,69 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </h4>
               <div>
                 <span className="text-slate-500 block">Processo Antigo:</span>
-                <span className="font-mono text-slate-800 font-medium">{sst.processoAntigo || '- - - -'}</span>
+                {linkInfo && linkInfo.prevLinks.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 mt-0.5">
+                    {linkInfo.prevLinks.map((pv) => {
+                      const numAno = formatProcessoNumeroAno(pv.processo ?? pv.numero, {
+                        ano: pv.anoExercicio,
+                        dataRef: pv.dataEntrada || pv.dataExpedicao,
+                      });
+                      return (
+                        <button
+                          key={pv.id}
+                          type="button"
+                          onClick={() => onNavigateToProcess?.(pv)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 hover:bg-blue-50 border border-slate-300 hover:border-blue-300 font-mono font-bold text-slate-900 hover:text-blue-900 cursor-pointer transition-colors"
+                        >
+                          <CornerDownRight className="w-3 h-3 text-slate-500" />
+                          <span>{numAno}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="font-mono text-slate-800 font-medium">
+                    {cleanProcessLinkValue(sst.processoAntigo) || '-'}
+                  </span>
+                )}
               </div>
               <div>
                 <span className="text-slate-500 block">Nº do Doc. Antigo:</span>
-                <span className="font-mono text-slate-800 font-medium">{sst.numDocAntigo || '- - - -'}</span>
+                <span className="font-mono text-slate-800 font-medium">
+                  {cleanProcessLinkValue(sst.numDocAntigo) || '-'}
+                </span>
               </div>
               <div>
                 <span className="text-slate-500 block">Processo Seguinte:</span>
-                <span className="font-mono text-blue-900 font-bold">{sst.processoSeguinte || '2394'}</span>
+                {linkInfo && linkInfo.nextLinks.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 mt-0.5">
+                    {linkInfo.nextLinks.map((nx) => {
+                      const numAno = formatProcessoNumeroAno(nx.processo ?? nx.numero, {
+                        ano: nx.anoExercicio,
+                        dataRef: nx.dataEntrada || nx.dataExpedicao,
+                      });
+                      return (
+                        <button
+                          key={nx.id}
+                          type="button"
+                          onClick={() => onNavigateToProcess?.(nx)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 border border-blue-200 hover:border-blue-400 font-mono font-bold text-blue-900 cursor-pointer transition-colors"
+                        >
+                          <span>{numAno}</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="font-mono text-blue-900 font-bold">
+                    {cleanProcessLinkValue(sst.processoSeguinte) || '-'}
+                  </span>
+                )}
               </div>
               <div>
                 <span className="text-slate-500 block">Data Base / Referência:</span>
-                <span className="font-mono text-slate-800 font-semibold">{sst.dataBase || '15'}</span>
+                <span className="font-mono text-slate-800 font-semibold">{sst.dataBase || '-'}</span>
               </div>
             </div>
 
@@ -565,15 +951,17 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </h4>
               <div>
                 <span className="text-slate-500 block">Localização no Acervo:</span>
-                <span className="font-bold text-purple-900 block mt-0.5">{sst.localizacao || 'PASTA INTERNET'}</span>
+                <span className="font-bold text-purple-900 block mt-0.5">{sst.localizacao || 'Não informado'}</span>
               </div>
               <div>
                 <span className="text-slate-500 block">Proc. Administrativo CBMERJ:</span>
-                <span className="font-mono text-slate-800">{notification.processoAdministrativo || `E-27/010/2026-${notification.processo}`}</span>
+                <span className="font-mono text-slate-800 font-semibold">
+                  {notification.processoAdministrativo || 'Não informado'}
+                </span>
               </div>
               <div>
                 <span className="text-slate-500 block">Fiscal Responsável:</span>
-                <span className="text-slate-800 font-medium">{notification.fiscalResponsavel}</span>
+                <span className="text-slate-800 font-medium">{notification.fiscalResponsavel || 'Não informado'}</span>
               </div>
             </div>
           </div>
@@ -811,12 +1199,24 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                           </span>
                         </td>
                         <td className="py-2 px-3">
-                          <span className="font-semibold text-slate-800 px-2 py-0.5 rounded bg-slate-50 border border-slate-200 inline-block">
-                            {bilhete.statusOuParecer || outrosBilhetesVal || 'Registrado'}
+                          <span className={`px-2.5 py-0.5 rounded border inline-block text-xs font-semibold ${
+                            (bilhete.statusOuParecer || '').toUpperCase() === 'BILHETE 1'
+                              ? 'text-blue-900 bg-blue-50 border-blue-200 font-bold'
+                              : (bilhete.statusOuParecer || '').toUpperCase().startsWith('BILHETE')
+                              ? 'text-purple-900 bg-purple-50 border-purple-200 font-bold'
+                              : (bilhete.statusOuParecer || '').toUpperCase() === 'GERADO DI'
+                              ? 'text-red-900 bg-red-50 border-red-200 font-bold'
+                              : (bilhete.statusOuParecer || '').toUpperCase() === 'FINALIZADO'
+                              ? 'text-slate-800 bg-slate-100 border-slate-300 font-bold'
+                              : (bilhete.statusOuParecer || '').toUpperCase().includes('RETORNO')
+                              ? 'text-amber-900 bg-amber-50 border-amber-200 font-bold'
+                              : 'text-slate-800 bg-slate-50 border-slate-200'
+                          }`}>
+                            {bilhete.statusOuParecer || (bIdx === 0 ? 'BILHETE 1' : 'Registrado')}
                           </span>
                         </td>
                         <td className="py-2 px-3 text-slate-600 text-[11px]">
-                          {bilhete.despacho || (bIdx === 0 ? `Bilhete inicial protocolado com ${bilhete.dias || 0} dias.` : `Despacho final com ${bilhete.dias || 0} dias.`)}
+                          {bilhete.despacho || (bIdx === 0 ? `Bilhete inicial lançado com ${bilhete.dias || 0} dias.` : `Despacho com ${bilhete.dias || 0} dias.`)}
                         </td>
                       </tr>
                     ))}

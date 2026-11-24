@@ -1,5 +1,6 @@
 import { BuildingNotification, DocumentType, StatusType, SSTProcessDetails, BilheteItem } from '../types';
 import { formatDateBR, formatProcesso, formatCpfCnpj, adicionarDiasAData, getDiasPrazoPorTipo, calcularPrazoProcesso } from './helpers';
+import { cleanProcessLinkValue, computeLinkBackfillUpdates } from './processLinks';
 
 /**
  * Robust CSV / TSV parser that accurately handles quotes, escaped quotes, line breaks,
@@ -132,14 +133,18 @@ export function mapHeadersToIndexes(headers: string[], subHeaders?: string[]): R
       }
     }
 
-    // ENTRADA NA SST
-    if (norm.includes('entradasst') || (norm.includes('entrada') && norm.includes('sst'))) {
+    // ENTRADA NA SST (inclui "ENTRADA NA SST PROTOCOLO")
+    if (
+      norm.includes('entradasst') ||
+      (norm.includes('entrada') && norm.includes('sst')) ||
+      (norm.includes('entrada') && (norm.includes('protocolo') || subNorm.includes('protocolo')))
+    ) {
       if (map.entradaSST === undefined) map.entradaSST = idx;
       if (map.dataEntrada === undefined) map.dataEntrada = idx;
     }
 
     // ENTRADA DA OBM
-    if (norm.includes('entradaobm') || (norm.includes('entrada') && norm.includes('obm'))) {
+    if (norm.includes('entradaobm') || (norm.includes('entrada') && (norm.includes('obm') || subNorm.includes('obm')))) {
       if (map.entradaOBM === undefined) map.entradaOBM = idx;
     }
 
@@ -384,16 +389,14 @@ export function convertRowsToNotifications(
     };
 
     const rawProc = val(map.processo, 0);
-    const rawTipo = val(map.tipoProcesso, 1) || 'Certificado de Aprovação';
+    const rawTipo = val(map.tipoProcesso, 1);
     const rawCodigo = val(map.codigoSST, 2);
     const rawDataBase = val(map.dataBase, 3);
-    const rawOrigem = val(map.origem, 4) || 'ANGRA DOS REIS';
+    const rawOrigem = val(map.origem, 4);
     const rawRequerente = val(map.requerente, 5) || val(map.edificacao);
     const rawCpfCnpj = val(map.cpfOuCnpj, 6);
 
     // CRITICAL: Filter out empty or template rows!
-    // Rows in Google Sheets that have formulas dragged down often only have '- - - -', '30/12', etc.,
-    // with NO processo digits and NO requester name. These are NOT valid records!
     const procDigits = rawProc.replace(/[^\d]/g, '');
     const cleanReq = rawRequerente.replace(/[-_\s]/g, '');
 
@@ -402,45 +405,45 @@ export function convertRowsToNotifications(
       return;
     }
 
-    // Requerente
-    const requerenteFinal = rawRequerente && rawRequerente !== '- - - -'
+    // Requerente: estritamente o que estiver na planilha
+    const requerenteFinal = rawRequerente && rawRequerente !== '- - - -' && rawRequerente !== '-'
       ? rawRequerente
-      : (procDigits ? `Processo nº ${procDigits.padStart(5, '0')}` : 'Requerente Não Informado');
+      : (procDigits ? `Processo nº ${procDigits.padStart(5, '0')}` : (rawProc || ''));
 
-    // Dates
+    // Dates: estritamente o que estiver na planilha
     const rawEntradaSST = (map.entradaSST !== undefined ? row[map.entradaSST]?.trim() : '') || val(map.dataEntrada, 7);
-    const rawEntradaOBM = val(map.entradaOBM, 8) || rawEntradaSST;
-    const rawDiasEntrada = val(map.diasEntrada, 9) || '0';
+    const rawEntradaOBM = val(map.entradaOBM, 8);
+    const rawDiasEntrada = val(map.diasEntrada, 9);
 
-    const rawProcAntigo = val(map.processoAntigo, 10) || '- - - -';
-    const rawDocAntigo = val(map.numDocAntigo, 11) || '- - - -';
-    const rawEnvioDivisao = val(map.envioDirDivisao, 12) || rawEntradaSST;
-    const rawDiasEnvio = val(map.diasEnvioDivisao, 13) || '0';
+    const rawProcAntigo = val(map.processoAntigo, 10);
+    const rawDocAntigo = val(map.numDocAntigo, 11);
+    const rawEnvioDivisao = val(map.envioDirDivisao, 12);
+    const rawDiasEnvio = val(map.diasEnvioDivisao, 13);
 
-    // Status / Situação (Coluna 14 na planilha)
-    const rawSituacao = (map.situacao !== undefined ? row[map.situacao]?.trim() : '') || val(map.status, 14) || 'Notificação';
+    // Status / Situação: estritamente o que estiver na planilha
+    const rawSituacao = (map.situacao !== undefined ? row[map.situacao]?.trim() : '') || val(map.status, 14);
     const rawBilhetes = val(map.bilhetes, 15);
-    const rawDiasBilhetes = val(map.diasBilhetes, 16) || '0';
+    const rawDiasBilhetes = val(map.diasBilhetes, 16);
     const rawOutrosBilhetes = val(map.outrosBilhetes, 17);
     const rawUltimoBilhete = val(map.ultimoBilhete, 18);
-    const rawDiasUltimoBilhete = val(map.diasUltimoBilhete, 19) || '0';
+    const rawDiasUltimoBilhete = val(map.diasUltimoBilhete, 19);
 
     const rawAoDiretor = val(map.aoDiretor, 20);
-    const rawDiasAoDiretor = val(map.diasAoDiretor, 21) || '0';
+    const rawDiasAoDiretor = val(map.diasAoDiretor, 21);
 
     const rawGrafico = val(map.grafico, 22);
     const rawDocGerado = val(map.docGerado, 23);
-    const rawSituacaoDoc = val(map.situacaoDocGerado, 24) || '';
+    const rawSituacaoDoc = val(map.situacaoDocGerado, 24);
 
     const rawPrevisao = val(map.previsaoPronto, 25);
     const rawDataPronto = val(map.dataPronto, 26);
     const rawProcSeguinte = val(map.processoSeguinte, 27);
     const rawDataEntregue = val(map.dataEntregue, 28);
     const rawDiasEntrega = val(map.diasEntrega, 29);
-    const rawDiasAtraso = val(map.diasEmAtraso, 30) || '0';
+    const rawDiasAtraso = val(map.diasEmAtraso, 30);
     const rawDiasSST = val(map.diasNaSST, 31);
     const rawNoGeral = val(map.noGeral, 32);
-    const rawLocalizacao = val(map.localizacao, 33) || 'PASTA INTERNET';
+    const rawLocalizacao = val(map.localizacao, 33);
 
     // Number & Processo format (ex: 00075)
     let parsedNumber = startNumber + items.length;
@@ -450,54 +453,51 @@ export function convertRowsToNotifications(
       processoStr = procDigits.padStart(5, '0');
     } else if (rawProc) {
       processoStr = rawProc;
-    } else {
-      processoStr = '';
     }
 
-    // Format Dates (DD/MM/AAAA)
-    const dataEntradaFormatada = formatDateBR(rawEntradaSST || rawEntradaOBM || '05/01/2026');
+    // Format Dates (DD/MM/AAAA) - Apenas se houver data fornecida no CSV
+    const rawEntrada = rawEntradaSST || rawEntradaOBM;
+    const dataEntradaFormatada = rawEntrada ? formatDateBR(rawEntrada) : '';
 
-    // Consolidated legal deadline calculation based on official rules
+    // Consolidated legal deadline calculation
     const prazoCalc = calcularPrazoProcesso({
-      dataEntrada: dataEntradaFormatada,
-      tipoProcesso: rawTipo,
-      status: rawSituacao,
+      dataEntrada: dataEntradaFormatada || undefined,
+      tipoProcesso: rawTipo || undefined,
+      status: rawSituacao || undefined,
+      detalhesSST: {
+        entradaSST: rawEntradaSST || undefined,
+        dataPronto: rawDataPronto || undefined,
+      },
     });
 
-    const dataTramiteFormatada = prazoCalc.dataLimiteBR;
+    const dataTramiteFormatada = prazoCalc.dataLimiteBR !== '-' ? prazoCalc.dataLimiteBR : null;
 
-    // Normalized Status
-    let statusFinal: StatusType = rawSituacao as StatusType;
-    if (!statusFinal || statusFinal === '-' || statusFinal.trim() === '') {
-      statusFinal = 'Notificação';
-    }
+    // Status
+    const statusFinal: StatusType = (rawSituacao || 'EM ANÁLISE') as StatusType;
 
-    // Document Type
+    // Document Type baseado no tipo informado
     let docTypeFinal: DocumentType = 'Notificação';
-    const tipoLower = rawTipo.toLowerCase();
-    if (tipoLower.includes('infracao')) docTypeFinal = 'Auto de Infração';
+    const tipoLower = (rawTipo || '').toLowerCase();
+    if (tipoLower.includes('infracao') || tipoLower.includes('infração')) docTypeFinal = 'Auto de Infração';
     else if (tipoLower.includes('interd')) docTypeFinal = 'Interdição';
     else if (tipoLower.includes('tac')) docTypeFinal = 'TAC';
     else if (tipoLower.includes('preventiv')) docTypeFinal = 'Notificação Preventiva';
 
-    // OBM Unit
-    const obmNome = rawOrigem.includes('GBM')
-      ? rawOrigem
-      : rawOrigem.toUpperCase().includes('ITAGUAI')
-      ? '26º GBM - ITAGUAÍ'
-      : '10º GBM - ANGRA DOS REIS';
+    // OBM Unit (apenas o que estiver na planilha)
+    const obmNome = rawOrigem || (val(map.obm) || '');
 
-    // Endereço / Localização
-    const rawEndereco = val(map.logradouro) || 'Endereço registrado no processo';
-    const rawNumEnd = val(map.numeroEndereco) || 's/n';
-    const bairro = val(map.bairro) || 'Centro';
-    const municipio = val(map.municipio) || (rawOrigem.includes('ITAGUAÍ') ? 'Itaguaí' : 'Angra dos Reis');
+    // Endereço / Localização (apenas dados presentes na planilha, sem inventar)
+    const rawEndereco = val(map.logradouro) || '';
+    const rawNumEnd = val(map.numeroEndereco) || '';
+    const bairro = val(map.bairro) || '';
+    const municipio = val(map.municipio) || (rawOrigem || '');
 
-    // Fiscal
-    const fiscal = val(map.fiscal) || 'Cap. BM Rodrigo P. Silva';
-    const processoAdm = val(map.processoAdm) || (processoStr ? `E-27/010/2026-${processoStr}` : '');
+    // Fiscal (apenas dados presentes na planilha)
+    const fiscal = val(map.fiscal) || '';
+    const matricula = val(map.matriculaFiscal) || '';
+    const processoAdm = val(map.processoAdm) || '';
 
-    // Exigências
+    // Exigências (apenas se fornecidas na planilha)
     let exigencias: string[] = [];
     const rawExig = val(map.exigencias);
     if (rawExig) {
@@ -506,125 +506,116 @@ export function convertRowsToNotifications(
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
     }
-    if (exigencias.length === 0) {
-      exigencias = ['Medidas de segurança contra incêndio e pânico regulamentares'];
-    }
 
-    // Construção dos Bilhetes Estruturados (1º Bilhete, Intermediários, Último Bilhete)
+    // Bilhetes Estruturados (apenas quando presentes na planilha)
     const dataBilheteFormatada = rawBilhetes ? formatDateBR(rawBilhetes) : '';
     const ultimoBilheteFormatada = rawUltimoBilhete ? formatDateBR(rawUltimoBilhete) : '';
 
     const listaBilhetes: BilheteItem[] = [];
     if (rawBilhetes && rawBilhetes !== '- - - -' && rawBilhetes !== '-') {
+      // O 1º Bilhete é sempre identificado como BILHETE 1 (não copia a situação dos outros bilhetes)
       listaBilhetes.push({
         id: `bilhete-1-${processoStr || rowIdx}`,
         ordem: 1,
         tipo: 'primeiro',
-        rotulo: '1º Bilhete (Data do Bilhete)',
+        tipoDetalhe: 'BILHETE',
+        rotulo: '1º Bilhete',
         data: dataBilheteFormatada,
-        dias: rawDiasBilhetes,
-        statusOuParecer: rawOutrosBilhetes || 'Registrado',
-        despacho: `Primeiro bilhete registrado na SST com ${rawDiasBilhetes} dia(s) decorridos.`,
-        autor: 'Fiscal SST 10º GBM',
+        dias: rawDiasBilhetes || '0',
+        statusOuParecer: 'BILHETE 1',
+        despacho: `Primeiro bilhete lançado com ${rawDiasBilhetes || 0} dia(s) decorridos.`,
+        autor: fiscal || '',
       });
     }
 
     if (rawUltimoBilhete && rawUltimoBilhete !== '- - - -' && rawUltimoBilhete !== '-') {
       const isDiferente = rawUltimoBilhete !== rawBilhetes || rawDiasUltimoBilhete !== rawDiasBilhetes;
-      listaBilhetes.push({
-        id: `bilhete-ultimo-${processoStr || rowIdx}`,
-        ordem: isDiferente ? 2 : 2,
-        tipo: 'ultimo',
-        rotulo: 'Último Bilhete (Data do Último Bilhete)',
-        data: ultimoBilheteFormatada,
-        dias: rawDiasUltimoBilhete,
-        statusOuParecer: rawOutrosBilhetes || 'Concluído',
-        despacho: `Último bilhete registrado com ${rawDiasUltimoBilhete} dia(s) decorridos. Parecer: ${rawOutrosBilhetes || 'Registrado'}.`,
-        autor: 'Fiscal SST 10º GBM',
-      });
+      if (isDiferente || listaBilhetes.length === 0) {
+        // O Último Bilhete recebe a situação da coluna OUTROS BILHETES (ex: BILHETE 3, RETORNO, GERADO DI, FINALIZADO)
+        listaBilhetes.push({
+          id: `bilhete-ultimo-${processoStr || rowIdx}`,
+          ordem: listaBilhetes.length + 1,
+          tipo: 'ultimo',
+          tipoDetalhe: 'RETORNO',
+          rotulo: 'Último Bilhete',
+          data: ultimoBilheteFormatada,
+          dias: rawDiasUltimoBilhete || '0',
+          statusOuParecer: rawOutrosBilhetes || 'Último Bilhete',
+          despacho: rawOutrosBilhetes ? `Parecer: ${rawOutrosBilhetes}` : `Último bilhete registrado com ${rawDiasUltimoBilhete || 0} dia(s) decorridos.`,
+          autor: fiscal || '',
+        });
+      }
     }
 
     const sstDetails: SSTProcessDetails = {
-      codigo: rawCodigo || '11220',
-      dataBase: rawDataBase || String(prazoCalc.diasPrazo),
-      entradaSST: rawEntradaSST || '05/01',
-      entradaOBM: rawEntradaOBM || '05/01',
-      diasEntrada: rawDiasEntrada || '0',
-      processoAntigo: rawProcAntigo || '- - - -',
-      numDocAntigo: rawDocAntigo || '- - - -',
-      envioDirDivisao: rawEnvioDivisao || rawEntradaSST,
-      diasEnvioDivisao: rawDiasEnvio || '0',
-      situacao: rawSituacao || statusFinal,
+      codigo: rawCodigo || '',
+      dataBase: rawDataBase || '',
+      entradaSST: rawEntradaSST || '',
+      entradaOBM: rawEntradaOBM || '',
+      diasEntrada: rawDiasEntrada || '',
+      processoAntigo: cleanProcessLinkValue(rawProcAntigo),
+      numDocAntigo: cleanProcessLinkValue(rawDocAntigo),
+      envioDirDivisao: rawEnvioDivisao || '',
+      diasEnvioDivisao: rawDiasEnvio || '',
+      situacao: rawSituacao || '',
       bilhetes: rawBilhetes || '',
       dataBilhete: rawBilhetes || '',
-      diasBilhetes: rawDiasBilhetes || '0',
-      diasBilhete: rawDiasBilhetes || '0',
+      diasBilhetes: rawDiasBilhetes || '',
+      diasBilhete: rawDiasBilhetes || '',
       outrosBilhetes: rawOutrosBilhetes || '',
       ultimoBilhete: rawUltimoBilhete || '',
-      diasUltimoBilhete: rawDiasUltimoBilhete || '0',
+      diasUltimoBilhete: rawDiasUltimoBilhete || '',
       listaBilhetes,
       aoDiretor: rawAoDiretor || '',
       dataAoDiretor: rawAoDiretor || '',
-      diasAoDiretor: rawDiasAoDiretor || '0',
+      diasAoDiretor: rawDiasAoDiretor || '',
       grafico: rawGrafico || '',
       docGerado: rawDocGerado || '',
       situacaoDocGerado: rawSituacaoDoc || '',
       previsaoPronto: rawPrevisao || '',
-      diasPrevisao: '',
+      diasPrevisao: val(map.diasPrevisao) || '',
       dataPronto: rawDataPronto || '',
-      processoSeguinte: rawProcSeguinte || '',
+      processoSeguinte: cleanProcessLinkValue(rawProcSeguinte),
       dataEntregue: rawDataEntregue || '',
       diasEntrega: rawDiasEntrega || '',
-      diasEmAtraso: rawDiasAtraso || '0',
+      diasEmAtraso: rawDiasAtraso || '',
       diasNaSST: rawDiasSST || '',
       noGeral: rawNoGeral || '',
-      localizacao: rawLocalizacao || 'PASTA INTERNET',
+      localizacao: rawLocalizacao || '',
     };
 
-    // Histórico detalhado incorporando eventos de bilhetes da planilha
+    // Histórico de auditoria real
     const historicoInicial: any[] = [];
-    if (rawUltimoBilhete && rawUltimoBilhete !== '- - - -' && rawUltimoBilhete !== '-') {
+    if (dataEntradaFormatada) {
       historicoInicial.push({
-        id: `h-ultimo-bilhete-${Date.now()}-${rowIdx}`,
-        data: ultimoBilheteFormatada,
-        autor: 'Fiscal SST 10º GBM',
-        acao: 'Último Bilhete Registrado',
-        detalhes: `Data do Último Bilhete: ${ultimoBilheteFormatada} (${rawDiasUltimoBilhete} dia(s) decorridos). Parecer: ${rawOutrosBilhetes || 'Registrado'}.`,
+        id: `h-import-${Date.now()}-${rowIdx}`,
+        data: dataEntradaFormatada,
+        autor: 'Importação CSV',
+        acao: 'Entrada Registrada',
+        detalhes: `Entrada registrada em ${dataEntradaFormatada}.${rawTipo ? ` Tipo: ${rawTipo}.` : ''}${rawOrigem ? ` Origem: ${rawOrigem}.` : ''}`,
       });
     }
-    if (rawBilhetes && rawBilhetes !== '- - - -' && rawBilhetes !== '-' && (rawBilhetes !== rawUltimoBilhete || historicoInicial.length === 0)) {
-      historicoInicial.push({
-        id: `h-bilhete-1-${Date.now()}-${rowIdx}`,
-        data: dataBilheteFormatada,
-        autor: 'Fiscal SST 10º GBM',
-        acao: '1º Bilhete Registrado',
-        detalhes: `Data do 1º Bilhete: ${dataBilheteFormatada} (${rawDiasBilhetes} dia(s) decorridos).`,
-      });
-    }
-    historicoInicial.push({
-      id: `h-import-${Date.now()}-${rowIdx}`,
-      data: dataEntradaFormatada,
-      autor: 'Protocolo SST 10º GBM',
-      acao: 'Entrada na SST',
-      detalhes: `Processo autuado na SST. Requerente: ${requerenteFinal}. Tipo: ${rawTipo} – Origem: ${rawOrigem}. Prazo legal: ${prazoCalc.diasPrazo} dias.`,
-    });
+
+    const safeProcPart = (processoStr || String(rowIdx)).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+    const yearMatch = dataEntradaFormatada.match(/(\d{4})/);
+    const anoExercicioInferido = yearMatch ? yearMatch[1] : String(new Date().getFullYear());
 
     const item: BuildingNotification = {
-      id: `proc-${processoStr || rowIdx}-${Date.now()}-${rowIdx}`,
+      id: `proc-${safeProcPart}-${Date.now()}-${rowIdx}`,
       numero: parsedNumber,
       processo: processoStr || undefined,
-      codigoDocumento: `SST-10GBM/${processoStr || 'S-N'}`,
+      codigoDocumento: processoStr ? `Processo nº ${processoStr}` : (rawCodigo ? `Código: ${rawCodigo}` : 'S/N'),
       edificacao: requerenteFinal,
       requerente: requerenteFinal,
-      tipoProcesso: rawTipo,
-      origem: rawOrigem,
+      tipoProcesso: rawTipo || '',
+      origem: rawOrigem || '',
       status: statusFinal,
       tipoDocumento: docTypeFinal,
       obm: obmNome,
       dataExpedicao: dataEntradaFormatada,
       dataEntrada: dataEntradaFormatada,
-      dataValidade: dataTramiteFormatada !== '-' ? dataTramiteFormatada : null,
-      dataTramite: dataTramiteFormatada !== '-' ? dataTramiteFormatada : null,
+      dataValidade: dataTramiteFormatada,
+      dataTramite: dataTramiteFormatada,
       oculto: false,
       detalhesSST: sstDetails,
       endereco: {
@@ -640,17 +631,33 @@ export function convertRowsToNotifications(
         email: val(map.email) || '',
       },
       fiscalResponsavel: fiscal,
-      matriculaFiscal: '142.339-1',
+      matriculaFiscal: matricula,
       processoAdministrativo: processoAdm || undefined,
       exigencias,
-      observacoes: val(map.observacoes) || `Processo SST importado. Localização: ${sstDetails.localizacao}`,
+      observacoes: val(map.observacoes) || '',
       historico: historicoInicial,
       criadoEm: new Date().toISOString(),
       atualizadoEm: new Date().toISOString(),
+      anoExercicio: anoExercicioInferido,
     };
 
     items.push(item);
   });
+
+  // Consolida vínculos bidirecionais (PROCESSO ANTIGO <-> PROCESSO SEGUINTE) nos registros importados
+  const backfilled = computeLinkBackfillUpdates(items);
+  if (backfilled.length > 0) {
+    const patchMap = new Map(backfilled.map((u) => [u.id, u]));
+    for (let i = 0; i < items.length; i++) {
+      const patched = patchMap.get(items[i].id);
+      if (patched) {
+        items[i] = {
+          ...items[i],
+          detalhesSST: patched.detalhesSST,
+        };
+      }
+    }
+  }
 
   return { items, warnings };
 }

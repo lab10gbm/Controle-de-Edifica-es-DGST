@@ -1,0 +1,307 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Rede de segurança global (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Primitivas Globais de Identidade, ID e Tipos
+    // -------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidYearId(yearId) {
+      return yearId is string && yearId.size() == 4 && yearId.matches('^[0-9]{4}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'sst10gbm@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidDocumentType(val) {
+      return val is string && val.size() >= 3 && val.size() <= 40 && (
+        val == 'TAC'
+        || val.matches('^Notifica.{2,6}o( Preventiva)?$')
+        || val.matches('^Auto de Infra.{2,6}o$')
+        || val.matches('^Interdi.{2,6}o$')
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Validadores Estritos de Entidades
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt'])
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() <= 160
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (data.role == 'operator' || (data.role == 'admin' && isAdmin()))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFiscalYearBucket(data, userId, yearId) {
+      return data.keys().hasAll(['year', 'ownerUid', 'label', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['year', 'ownerUid', 'label', 'createdAt', 'updatedAt'])
+        && isValidYearId(data.year)
+        && data.year == yearId
+        && data.ownerUid == userId
+        && data.ownerUid == request.auth.uid
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && data.label is string && data.label.size() <= 60
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEnderecoMap(end) {
+      return end is map
+        && end.keys().hasAll(['logradouro', 'numero', 'bairro', 'municipio'])
+        && end.keys().hasOnly(['logradouro', 'numero', 'complemento', 'bairro', 'municipio', 'cep', 'pontoReferencia'])
+        && end.logradouro is string && end.logradouro.size() <= 240
+        && end.numero is string && end.numero.size() <= 40
+        && (!('complemento' in end) || (end.complemento is string && end.complemento.size() <= 120))
+        && end.bairro is string && end.bairro.size() <= 120
+        && end.municipio is string && end.municipio.size() <= 120
+        && (!('cep' in end) || (end.cep is string && end.cep.size() <= 20))
+        && (!('pontoReferencia' in end) || (end.pontoReferencia is string && end.pontoReferencia.size() <= 200));
+    }
+
+    function isValidProprietarioMap(prop) {
+      return prop is map
+        && prop.keys().hasAll(['nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email'])
+        && prop.keys().hasOnly(['nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email'])
+        && prop.nomeOuRazaoSocial is string && prop.nomeOuRazaoSocial.size() <= 300
+        && prop.cpfOuCnpj is string && prop.cpfOuCnpj.size() <= 32
+        && prop.telefone is string && prop.telefone.size() <= 40
+        && prop.email is string && prop.email.size() <= 200;
+    }
+
+    function isValidDetalhesSSTMap(det) {
+      return det is map
+        && det.keys().size() <= 34
+        && det.keys().hasOnly([
+          'codigo', 'dataBase', 'entradaSST', 'entradaOBM', 'diasEntrada',
+          'processoAntigo', 'numDocAntigo', 'envioDirDivisao', 'diasEnvioDivisao',
+          'situacao', 'bilhetes', 'diasBilhetes', 'aoDiretor', 'dataAoDiretor',
+          'diasAoDiretor', 'grafico', 'docGerado', 'situacaoDocGerado',
+          'previsaoPronto', 'diasPrevisao', 'dataPronto', 'processoSeguinte',
+          'dataEntregue', 'diasEntrega', 'diasEmAtraso', 'diasNaSST', 'noGeral',
+          'localizacao', 'dataBilhete', 'diasBilhete', 'outrosBilhetes',
+          'ultimoBilhete', 'diasUltimoBilhete', 'listaBilhetes'
+        ])
+        && (!('situacao' in det) || (det.situacao is string && det.situacao.size() <= 120))
+        && (!('dataPronto' in det) || (det.dataPronto is string && det.dataPronto.size() <= 40))
+        && (!('listaBilhetes' in det) || (
+          det.listaBilhetes is list
+          && det.listaBilhetes.size() <= 50
+          && (det.listaBilhetes.size() == 0 || det.listaBilhetes[0] is map)
+        ));
+    }
+
+    function isValidNotification(data, userId, yearId, notificationId) {
+      return data.keys().size() == 31
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'anoExercicio', 'numero', 'processo', 'codigoDocumento',
+          'edificacao', 'requerente', 'tipoProcesso', 'origem', 'status', 'tipoDocumento',
+          'obm', 'dataExpedicao', 'dataEntrada', 'dataValidade', 'dataTramite', 'oculto',
+          'detalhesSST', 'endereco', 'proprietario', 'fiscalResponsavel', 'matriculaFiscal',
+          'processoAdministrativo', 'exigencias', 'observacoes', 'historico',
+          'criadoEm', 'atualizadoEm', 'createdAt', 'updatedAt'
+        ])
+        && data.id == notificationId
+        && data.ownerUid == userId
+        && data.ownerUid == request.auth.uid
+        && isValidYearId(data.anoExercicio)
+        && data.anoExercicio == yearId
+        && data.numero is number && data.numero >= 0
+        && data.processo is string && data.processo.size() <= 64
+        && data.codigoDocumento is string && data.codigoDocumento.size() <= 120
+        && data.edificacao is string && data.edificacao.size() <= 300
+        && data.requerente is string && data.requerente.size() <= 300
+        && data.tipoProcesso is string && data.tipoProcesso.size() <= 120
+        && data.origem is string && data.origem.size() <= 160
+        && data.status is string && data.status.size() <= 120
+        && isValidDocumentType(data.tipoDocumento)
+        && data.obm is string && data.obm.size() <= 160
+        && data.dataExpedicao is string && data.dataExpedicao.size() <= 40
+        && data.dataEntrada is string && data.dataEntrada.size() <= 40
+        && (data.dataValidade == null || (data.dataValidade is string && data.dataValidade.size() <= 40))
+        && (data.dataTramite == null || (data.dataTramite is string && data.dataTramite.size() <= 40))
+        && data.oculto is bool
+        && isValidDetalhesSSTMap(data.detalhesSST)
+        && isValidEnderecoMap(data.endereco)
+        && isValidProprietarioMap(data.proprietario)
+        && data.fiscalResponsavel is string && data.fiscalResponsavel.size() <= 160
+        && data.matriculaFiscal is string && data.matriculaFiscal.size() <= 60
+        && data.processoAdministrativo is string && data.processoAdministrativo.size() <= 120
+        && data.exigencias is list
+        && data.exigencias.size() <= 100
+        && (data.exigencias.size() == 0 || (data.exigencias[0] is string && data.exigencias[0].size() <= 500))
+        && data.observacoes is string && data.observacoes.size() <= 4000
+        && data.historico is list
+        && data.historico.size() <= 150
+        && (data.historico.size() == 0 || data.historico[0] is map)
+        && data.criadoEm is string && data.criadoEm.size() <= 64
+        && data.atualizadoEm is string && data.atualizadoEm.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Documento de verificação de conectividade inicial (somente leitura pontual)
+    // -------------------------------------------------------------------------
+    match /test/connection {
+      allow get: if isSignedIn();
+      allow list, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Coleção de Administradores (somente leitura pelo próprio admin)
+    // -------------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isVerifiedUser() && request.auth.uid == adminId;
+      allow list, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Perfis de Usuário e Base Anual SST
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isVerifiedUser() && resource.data.uid == request.auth.uid;
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+
+      // Contêiner de Exercício Anual (ex: 2026, 2027)
+      match /years/{yearId} {
+        allow get: if isValidId(userId) && isValidYearId(yearId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+
+        allow create: if isValidId(userId)
+          && isValidYearId(yearId)
+          && isOwner(userId)
+          && isValidFiscalYearBucket(incoming(), userId, yearId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isValidId(userId)
+          && isValidYearId(yearId)
+          && isValidFiscalYearBucket(incoming(), userId, yearId)
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().year == existing().year
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin()
+            || (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'updatedAt']))
+          );
+
+        allow delete: if isValidId(userId) && isValidYearId(yearId) && (isOwner(userId) || isAdmin());
+
+        // Notificações e Processos SST do Exercício
+        match /notifications/{notificationId} {
+          allow get: if isValidId(userId) && isValidYearId(yearId) && isValidId(notificationId)
+            && (isOwner(userId) || isAdmin());
+          allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+
+          allow create: if isValidId(userId)
+            && isValidYearId(yearId)
+            && isValidId(notificationId)
+            && isOwner(userId)
+            && isValidNotification(incoming(), userId, yearId, notificationId)
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && existsAfter(/databases/$(database)/documents/users/$(userId)/years/$(yearId));
+
+          allow update: if isValidId(userId)
+            && isValidYearId(yearId)
+            && isValidId(notificationId)
+            && isValidNotification(incoming(), userId, yearId, notificationId)
+            && incoming().id == existing().id
+            && incoming().ownerUid == existing().ownerUid
+            && incoming().anoExercicio == existing().anoExercicio
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && (
+              isAdmin()
+              || (
+                isOwner(userId)
+                && existing().status != 'Encerrado'
+                && (
+                  incoming().diff(existing()).affectedKeys().hasOnly(['oculto', 'atualizadoEm', 'updatedAt'])
+                  || incoming().diff(existing()).affectedKeys().hasOnly(['historico', 'detalhesSST', 'atualizadoEm', 'updatedAt'])
+                  || incoming().diff(existing()).affectedKeys().hasOnly([
+                    'numero', 'processo', 'codigoDocumento', 'edificacao', 'requerente',
+                    'tipoProcesso', 'origem', 'status', 'tipoDocumento', 'obm',
+                    'dataExpedicao', 'dataEntrada', 'dataValidade', 'dataTramite',
+                    'oculto', 'detalhesSST', 'endereco', 'proprietario',
+                    'fiscalResponsavel', 'matriculaFiscal', 'processoAdministrativo',
+                    'exigencias', 'observacoes', 'historico', 'atualizadoEm', 'updatedAt'
+                  ])
+                )
+              )
+            );
+
+          allow delete: if isValidId(userId)
+            && isValidYearId(yearId)
+            && isValidId(notificationId)
+            && (isOwner(userId) || isAdmin());
+        }
+      }
+    }
+  }
+}

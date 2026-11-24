@@ -1,0 +1,291 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil autenticado do operador ou administrador da Seção de Serviços Técnicos (SST - 10º GBM).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID do usuário no Firebase Authentication."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200,
+          "description": "E-mail institucional ou cadastrado do usuário."
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Nome de exibição do usuário."
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "URL da foto de perfil."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["operator", "admin"],
+          "description": "Papel de acesso do usuário no sistema."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo de tempo do servidor na criação do perfil."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo de tempo do servidor na última atualização."
+        }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "FiscalYearBucket": {
+      "title": "FiscalYearBucket",
+      "description": "Contêiner anual de exercício (ex: 2026, 2027) para particionamento de leituras e preservação histórica.",
+      "type": "object",
+      "properties": {
+        "year": {
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "maxLength": 4,
+          "description": "Ano de exercício no formato AAAA (ex: 2026, 2027)."
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID do proprietário da base anual."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Rótulo descritivo do exercício."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo de tempo de criação."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo de tempo de atualização."
+        }
+      },
+      "required": ["year", "ownerUid", "label", "createdAt", "updatedAt"]
+    },
+    "BuildingNotificationRecord": {
+      "title": "BuildingNotificationRecord",
+      "description": "Registro completo de processo, edificação e notificação SST armazenado por ano de exercício.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Identificador único do documento."
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID do proprietário responsável pelo registro."
+        },
+        "anoExercicio": {
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "maxLength": 4,
+          "description": "Ano de exercício do processo (ex: 2026, 2027)."
+        },
+        "numero": {
+          "type": "number",
+          "description": "Número sequencial ou numérico do processo."
+        },
+        "processo": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Código do processo formatado (ex: 00075)."
+        },
+        "codigoDocumento": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Identificação textual do documento."
+        },
+        "edificacao": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Nome da edificação ou requerente."
+        },
+        "requerente": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Nome do requerente."
+        },
+        "tipoProcesso": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Tipo do processo na SST."
+        },
+        "origem": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Origem ou município do processo."
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Situação atual do processo."
+        },
+        "tipoDocumento": {
+          "type": "string",
+          "enum": ["Notificação", "Auto de Infração", "Notificação Preventiva", "Interdição", "TAC"],
+          "description": "Classificação do documento de fiscalização."
+        },
+        "obm": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Organização Bombeiro Militar responsável."
+        },
+        "dataExpedicao": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data de entrada ou expedição."
+        },
+        "dataEntrada": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data de entrada na SST."
+        },
+        "dataValidade": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Prazo limite legal calculado ou vazio."
+        },
+        "dataTramite": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data de trâmite ou vazio."
+        },
+        "oculto": {
+          "type": "boolean",
+          "description": "Indica se o registro está arquivado/oculto da listagem principal."
+        },
+        "detalhesSST": {
+          "type": "object",
+          "description": "Campos da planilha SST e lista de bilhetes."
+        },
+        "endereco": {
+          "type": "object",
+          "description": "Dados de endereço da edificação."
+        },
+        "proprietario": {
+          "type": "object",
+          "description": "Dados do proprietário/responsável legal (PII)."
+        },
+        "fiscalResponsavel": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Nome do fiscal responsável."
+        },
+        "matriculaFiscal": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Matrícula funcional do fiscal."
+        },
+        "processoAdministrativo": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Número do processo administrativo CBMERJ."
+        },
+        "exigencias": {
+          "type": "array",
+          "description": "Lista de exigências técnicas notificadas."
+        },
+        "observacoes": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Observações e parecer técnico."
+        },
+        "historico": {
+          "type": "array",
+          "description": "Histórico cronológico de despachos e alterações."
+        },
+        "criadoEm": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Data ISO de criação no cliente."
+        },
+        "atualizadoEm": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Data ISO de atualização no cliente."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo de tempo do servidor na criação."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo de tempo do servidor na atualização."
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "anoExercicio",
+        "numero",
+        "processo",
+        "codigoDocumento",
+        "edificacao",
+        "requerente",
+        "tipoProcesso",
+        "origem",
+        "status",
+        "tipoDocumento",
+        "obm",
+        "dataExpedicao",
+        "dataEntrada",
+        "dataValidade",
+        "dataTramite",
+        "oculto",
+        "detalhesSST",
+        "endereco",
+        "proprietario",
+        "fiscalResponsavel",
+        "matriculaFiscal",
+        "processoAdministrativo",
+        "exigencias",
+        "observacoes",
+        "historico",
+        "criadoEm",
+        "atualizadoEm",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Perfil privado do operador autenticado no sistema SST."
+    },
+    "/users/{userId}/years/{yearId}": {
+      "schema": {
+        "$ref": "#/entities/FiscalYearBucket"
+      },
+      "description": "Metadados de cada ano de exercício (2026, 2027, etc.) pertencentes ao usuário."
+    },
+    "/users/{userId}/years/{yearId}/notifications/{notificationId}": {
+      "schema": {
+        "$ref": "#/entities/BuildingNotificationRecord"
+      },
+      "description": "Processos e notificações de edificações particionados por usuário e ano de exercício."
+    }
+  }
+}

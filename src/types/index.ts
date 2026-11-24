@@ -32,6 +32,7 @@ export interface BilheteItem {
   id: string;
   ordem: number; // 1, 2, 3...
   tipo: 'primeiro' | 'intermediario' | 'ultimo';
+  tipoDetalhe?: 'BILHETE' | 'RETORNO';
   rotulo: string; // Ex: '1º Bilhete (Data do Bilhete)', 'Último Bilhete', 'Bilhete Intermediário'
   data?: string; // DD/MM/AAAA ou DD/MM
   dias?: string | number; // Dias decorridos
@@ -131,6 +132,8 @@ export interface BuildingNotification {
   
   criadoEm: string;
   atualizadoEm: string;
+  anoExercicio?: string;
+  ownerUid?: string;
 }
 
 export interface FilterState {

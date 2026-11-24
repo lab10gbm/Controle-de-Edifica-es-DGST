@@ -6,13 +6,14 @@ import {
   FileDown, 
   Printer, 
   Filter, 
-  Eye, 
-  EyeOff, 
   Calendar,
   Building,
   Activity,
   ArrowUpDown,
-  UploadCloud
+  UploadCloud,
+  Trash2,
+  BarChart3,
+  RefreshCw
 } from 'lucide-react';
 import { FilterState, ExpirationFilter } from '../types';
 import { OBM_LIST, STATUS_LIST } from '../data/initialData';
@@ -23,10 +24,13 @@ interface FilterBarProps {
   onResetFilters: () => void;
   onOpenNewRecordModal: () => void;
   onOpenImportModal: () => void;
+  onOpenDgstSyncModal?: () => void;
   onOpenPrintModal: () => void;
   onExportCSV: () => void;
-  hiddenCount: number;
   totalFilteredCount: number;
+  totalRecords?: number;
+  onClearAllData?: () => void;
+  onOpenReports?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -35,10 +39,13 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onResetFilters,
   onOpenNewRecordModal,
   onOpenImportModal,
+  onOpenDgstSyncModal,
   onOpenPrintModal,
   onExportCSV,
-  hiddenCount,
   totalFilteredCount,
+  totalRecords,
+  onClearAllData,
+  onOpenReports,
 }) => {
   const handleInputChange = (field: keyof FilterState, value: any) => {
     setFilters((prev) => ({ ...prev, [field]: value }));
@@ -54,7 +61,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Buscar por Processo (ex: 00075), Requerente, Tipo, Origem ou Endereço..."
+              placeholder="Buscar por Processo (ex: E27/0134/11210/2026 ou 0134), Requerente, CPF/CNPJ, Tipo ou Origem..."
               value={filters.termoBusca}
               onChange={(e) => handleInputChange('termoBusca', e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600 transition-all placeholder:text-slate-400"
@@ -70,8 +77,20 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             )}
           </div>
 
-          {/* Action Buttons: Importar CSV, Novo Registro, Listar Todos, etc */}
+          {/* Action Buttons: Sincronizar DGST, Importar CSV, Novo Registro, Listar Todos, etc */}
           <div className="flex items-center gap-2 flex-wrap">
+            {onOpenDgstSyncModal && (
+              <button
+                type="button"
+                onClick={onOpenDgstSyncModal}
+                title="Correlacionar Relatório DGST (E27/PROC/COD/ANO e Datas do Pronto) e empurrar para o Firestore"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100/90 active:bg-indigo-200 border border-indigo-300 rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <RefreshCw className="w-4 h-4 text-indigo-700" />
+                <span>Sincronizar DGST / Prontos</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onOpenImportModal}
@@ -120,6 +139,30 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               <Printer className="w-3.5 h-3.5 text-slate-500" />
               <span className="hidden sm:inline">Imprimir</span>
             </button>
+
+            {onOpenReports && (
+              <button
+                type="button"
+                onClick={onOpenReports}
+                title="Abrir gráficos e relatórios trimestrais, quadrimestrais e semestrais"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <BarChart3 className="w-4 h-4 text-blue-700" />
+                <span>Gráficos / Relatórios</span>
+              </button>
+            )}
+
+            {onClearAllData && (totalRecords !== undefined ? totalRecords > 0 : totalFilteredCount > 0) && (
+              <button
+                type="button"
+                onClick={onClearAllData}
+                title="Limpar todos os registros da plataforma (Zerar base de dados)"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100/90 active:bg-rose-200 border border-rose-200 rounded-lg shadow-2xs transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span className="hidden sm:inline">Limpar Tudo</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -247,7 +290,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </div>
         </div>
 
-        {/* Footer of filter bar: counters and toggle hidden items */}
+        {/* Footer of filter bar: counters */}
         <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-3">
           <div className="flex items-center gap-2">
             <span>
@@ -258,30 +301,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 Filtros ativos
               </span>
             )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => handleInputChange('mostrarOcultos', !filters.mostrarOcultos)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer border ${
-                filters.mostrarOcultos
-                  ? 'bg-amber-50 text-amber-900 border-amber-300 font-medium'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              {filters.mostrarOcultos ? (
-                <>
-                  <EyeOff className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Ocultando registros arquivados</span>
-                </>
-              ) : (
-                <>
-                  <Eye className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Exibir ocultos ({hiddenCount})</span>
-                </>
-              )}
-            </button>
           </div>
         </div>
       </div>

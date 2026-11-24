@@ -5,6 +5,7 @@ import {
   convertRowsToNotifications, 
   getExampleCSV 
 } from '../utils/csvParser';
+import { isDgstReportCSV } from '../utils/dgstSync';
 import { formatDateBR, formatProcesso } from '../utils/helpers';
 import { 
   FileSpreadsheet, 
@@ -13,17 +14,17 @@ import {
   AlertTriangle, 
   X, 
   Download, 
-  Layers, 
   FileText, 
   ClipboardPaste,
   HelpCircle,
-  Eye
+  RefreshCw
 } from 'lucide-react';
 
 interface ImportCsvModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (items: BuildingNotification[], replaceExisting: boolean) => void;
+  onOpenDgstSyncWithText?: (csvText: string, fileName: string) => void;
   currentCount: number;
 }
 
@@ -31,14 +32,14 @@ export const ImportCsvModal: React.FC<ImportCsvModalProps> = ({
   isOpen,
   onClose,
   onImport,
+  onOpenDgstSyncWithText,
   currentCount,
 }) => {
-  if (!isOpen) return null;
-
   const [inputMode, setInputMode] = useState<'upload' | 'paste'>('upload');
   const [replaceMode, setReplaceMode] = useState<boolean>(true); // true = replace, false = append
   const [csvContent, setCsvContent] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
+  const [detectedDgst, setDetectedDgst] = useState<boolean>(false);
   
   // Parsed state
   const [previewItems, setPreviewItems] = useState<BuildingNotification[]>([]);
@@ -48,14 +49,18 @@ export const ImportCsvModal: React.FC<ImportCsvModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  if (!isOpen) return null;
+
   const handleProcessText = (text: string, sourceName = 'Dados colados') => {
     setErrorMsg('');
     setWarnings([]);
     setCsvContent(text);
     setFileName(sourceName);
+    setDetectedDgst(isDgstReportCSV(text));
 
     if (!text.trim()) {
       setPreviewItems([]);
+      setDetectedDgst(false);
       return;
     }
 
@@ -276,6 +281,32 @@ export const ImportCsvModal: React.FC<ImportCsvModalProps> = ({
             </div>
           )}
 
+          {/* DGST Report Auto-Detection Notice */}
+          {detectedDgst && onOpenDgstSyncWithText && (
+            <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="text-xs text-indigo-950 space-y-1">
+                <div className="font-bold text-indigo-900 flex items-center gap-1.5">
+                  <RefreshCw className="w-4 h-4 text-indigo-700" />
+                  <span>Relatório Oficial DGST Detectado (E27 / Prontos)</span>
+                </div>
+                <p className="text-indigo-800">
+                  Este arquivo está no padrão <strong>Relatório de Processos por OBM</strong>. Use a Correlação DGST para atualizar os números <code className="font-mono font-bold">E27/...</code>, endereços e <strong>Datas do Pronto</strong> preservando seus bilhetes e históricos existentes.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenDgstSyncWithText(csvContent, fileName || 'Relatório DGST.csv');
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-700 hover:bg-indigo-800 rounded-lg shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Abrir Correlação DGST</span>
+              </button>
+            </div>
+          )}
+
           {/* Parsing Errors */}
           {errorMsg && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5 text-xs text-rose-800">
@@ -326,14 +357,15 @@ export const ImportCsvModal: React.FC<ImportCsvModalProps> = ({
                       <th className="p-2">Tipo – Origem</th>
                       <th className="p-2">Data Entrada</th>
                       <th className="p-2">Status</th>
-                      <th className="p-2">Data Trâmite</th>
+                      <th className="p-2">DOC. GERADO</th>
+                      <th className="p-2">Localização</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {previewItems.slice(0, 5).map((item, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/70">
                         <td className="p-2 text-center font-mono font-bold text-slate-900">
-                          {formatProcesso(item.processo !== undefined ? item.processo : item.numero)}
+                          {formatProcesso(item.processo !== undefined ? item.processo : item.numero, { codigo: item.detalhesSST?.codigo, ano: item.anoExercicio })}
                         </td>
                         <td className="p-2 font-medium text-slate-900 uppercase">
                           {item.requerente || item.edificacao}
@@ -347,8 +379,11 @@ export const ImportCsvModal: React.FC<ImportCsvModalProps> = ({
                         <td className="p-2">
                           <span className="font-medium text-slate-800">{item.status}</span>
                         </td>
-                        <td className="p-2 font-mono text-slate-600">
-                          {formatDateBR(item.dataTramite || item.dataValidade)}
+                        <td className="p-2 font-mono font-bold text-slate-800">
+                          {item.detalhesSST?.docGerado || '—'}
+                        </td>
+                        <td className="p-2 font-medium text-slate-700">
+                          {item.detalhesSST?.localizacao || 'PROTOCOLO'}
                         </td>
                       </tr>
                     ))}

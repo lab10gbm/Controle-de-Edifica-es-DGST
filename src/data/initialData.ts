@@ -1,5 +1,4 @@
 import { BuildingNotification } from '../types';
-import sstNotifications from './sstNotifications.json';
 
 export const OBM_LIST = [
   '10º GBM - ANGRA DOS REIS',
@@ -33,7 +32,9 @@ export const LOCALIZACAO_LIST = [
   'PROTOCOLO',
   'DIR. DIVISÃO',
   'DIRETOR',
+  'PRONTO',
   'INTERNET',
+  'CX AUTORIZAÇÕES',
 ];
 
 export const TIPOS_PROCESSO_LIST = [
@@ -50,4 +51,5 @@ export const TIPOS_PROCESSO_LIST = [
 
 export { PRAZOS_POR_TIPO } from '../utils/helpers';
 
-export const INITIAL_NOTIFICATIONS: BuildingNotification[] = sstNotifications as BuildingNotification[];
+// Base de dados limpa (0 registros por padrão)
+export const INITIAL_NOTIFICATIONS: BuildingNotification[] = [];

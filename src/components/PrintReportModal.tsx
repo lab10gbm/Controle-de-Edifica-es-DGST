@@ -280,7 +280,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   {recordsList.map((item) => (
                     <tr key={item.id} className="border-b border-slate-200">
                       <td className="p-2 border-r border-slate-200 text-center font-mono font-bold">
-                        {formatProcesso(item.processo !== undefined ? item.processo : item.numero)}
+                        {formatProcesso(item.processo !== undefined ? item.processo : item.numero, { codigo: item.detalhesSST?.codigo, ano: item.anoExercicio })}
                       </td>
                       <td className="p-2 border-r border-slate-200">
                         <strong className="block text-slate-900 uppercase">{item.requerente || item.edificacao}</strong>
