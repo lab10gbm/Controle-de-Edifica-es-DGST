@@ -23,6 +23,7 @@ import { auth, isAuthorizedUser, signOutFirebase } from './firebase';
 import {
   batchImportNotificationsToFirestore,
   clearYearNotificationsInFirestore,
+  deleteNotificationFromFirestore,
   ensureUserProfile,
   inferAnoExercicio,
   saveNotificationToFirestore,
@@ -424,6 +425,8 @@ export default function App() {
   const [singlePrintRecord, setSinglePrintRecord] = useState<BuildingNotification | null>(null);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [isClearingRemote, setIsClearingRemote] = useState(false);
+  const [deletingRecord, setDeletingRecord] = useState<BuildingNotification | null>(null);
+  const [isDeletingSingle, setIsDeletingSingle] = useState(false);
 
   // Toast System
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -856,6 +859,49 @@ export default function App() {
     addToast('info', 'Rascunho local descartado', 'A plataforma utiliza exclusivamente os dados do Firestore.');
   };
 
+  const handleRequestDelete = (notification: BuildingNotification) => {
+    setDeletingRecord(notification);
+  };
+
+  const executeDeleteSingleRecord = async () => {
+    if (!user || !deletingRecord || isDeletingSingle) return;
+    setIsDeletingSingle(true);
+    const target = deletingRecord;
+    const fallbackYear = selectedYear === 'TODOS' ? currentYear : selectedYear;
+    const procLabel = formatProcessoNumeroAno(
+      target.processo !== undefined ? target.processo : target.numero,
+      { ano: target.anoExercicio, dataRef: target.dataEntrada || target.dataExpedicao }
+    );
+
+    try {
+      await deleteNotificationFromFirestore(user.uid, target, fallbackYear);
+      if (target.numero === 73456 || extractProcessoNumero(target.processo) === 73456) {
+        try {
+          localStorage.setItem('cbmerj_sst_open42_73456_created', '1');
+        } catch {
+          // ignore
+        }
+      }
+      if (editingRecord?.id === target.id) {
+        setEditingRecord(null);
+        setIsRecordModalOpen(false);
+      }
+      if (singlePrintRecord?.id === target.id) {
+        setSinglePrintRecord(null);
+      }
+      setDeletingRecord(null);
+      addToast(
+        'warning',
+        'Processo excluído do Firestore!',
+        `O processo ${procLabel} (${target.requerente || target.edificacao}) foi removido permanentemente.`
+      );
+    } catch (err) {
+      setFatalError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setIsDeletingSingle(false);
+    }
+  };
+
   const handleClearAllData = () => {
     setIsClearConfirmOpen(true);
   };
@@ -1058,6 +1104,7 @@ export default function App() {
               notifications={filteredNotifications}
               allNotifications={notifications}
               onEdit={handleEdit}
+              onDelete={handleRequestDelete}
               onAddQuickNote={handleAddQuickNote}
               onPrintSingle={handlePrintSingle}
               onResetFilters={handleResetFilters}
@@ -1219,6 +1266,93 @@ export default function App() {
                   <Trash2 className="w-3.5 h-3.5" />
                 )}
                 <span>{isClearingRemote ? 'Excluindo...' : 'Sim, Excluir Tudo'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão Individual */}
+      {deletingRecord && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-single-modal-title"
+        >
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-4 bg-rose-700 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-rose-100 shrink-0" />
+                <h3 id="delete-single-modal-title" className="text-sm font-bold">
+                  Confirmar Exclusão de Processo
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeletingRecord(null)}
+                disabled={isDeletingSingle}
+                className="p-1 rounded-lg text-rose-100 hover:text-white hover:bg-rose-800 transition-colors cursor-pointer"
+                aria-label="Fechar confirmação de exclusão"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-xs sm:text-sm text-slate-700">
+              <p>
+                Tem certeza de que deseja <strong>excluir permanentemente</strong> este processo do banco de dados Firestore?
+              </p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1 text-xs">
+                <p>
+                  <span className="text-slate-500">Processo:</span>{' '}
+                  <strong className="font-mono text-slate-900">
+                    {formatProcessoNumeroAno(
+                      deletingRecord.processo !== undefined ? deletingRecord.processo : deletingRecord.numero,
+                      {
+                        ano: deletingRecord.anoExercicio,
+                        dataRef: deletingRecord.dataEntrada || deletingRecord.dataExpedicao,
+                      }
+                    )}
+                  </strong>
+                </p>
+                <p className="truncate">
+                  <span className="text-slate-500">Requerente:</span>{' '}
+                  <strong className="text-slate-900 uppercase">
+                    {deletingRecord.requerente || deletingRecord.edificacao}
+                  </strong>
+                </p>
+                {deletingRecord.tipoProcesso && (
+                  <p className="truncate">
+                    <span className="text-slate-500">Tipo:</span>{' '}
+                    <span className="font-medium text-slate-800">{deletingRecord.tipoProcesso}</span>
+                  </p>
+                )}
+              </div>
+              <p className="text-[11px] text-rose-700 font-medium">
+                Esta ação não pode ser desfeita. Todos os dados, bilhetes e histórico deste processo serão removidos.
+              </p>
+            </div>
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeletingRecord(null)}
+                disabled={isDeletingSingle}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void executeDeleteSingleRecord()}
+                disabled={isDeletingSingle}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 active:bg-rose-900 disabled:opacity-60 rounded-lg shadow-xs transition-colors cursor-pointer"
+              >
+                {isDeletingSingle ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>{isDeletingSingle ? 'Excluindo...' : 'Sim, Excluir Processo'}</span>
               </button>
             </div>
           </div>

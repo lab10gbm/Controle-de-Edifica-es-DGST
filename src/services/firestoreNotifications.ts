@@ -1,6 +1,7 @@
 import { User } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
   doc,
   getDocFromServer,
   getDocs,
@@ -535,6 +536,22 @@ export async function updateHistoricoAndDetailsInFirestore(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteNotificationFromFirestore(
+  uid: string,
+  record: BuildingNotification,
+  fallbackYear: string
+): Promise<void> {
+  const safeId = sanitizeDocId(record.id);
+  const yearId = inferAnoExercicio(record, fallbackYear);
+  const path = `users/${uid}/years/${yearId}/notifications/${safeId}`;
+  const docRef = doc(db, 'users', uid, 'years', yearId, 'notifications', safeId);
+  try {
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

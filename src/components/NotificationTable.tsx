@@ -26,6 +26,7 @@ interface NotificationTableProps {
   notifications: BuildingNotification[];
   allNotifications?: BuildingNotification[];
   onEdit: (notification: BuildingNotification) => void;
+  onDelete?: (notification: BuildingNotification) => void;
   onAddQuickNote: (id: string, noteText: string, author: string) => void;
   onPrintSingle: (notification: BuildingNotification) => void;
   onResetFilters: () => void;
@@ -163,6 +164,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
   notifications,
   allNotifications,
   onEdit,
+  onDelete,
   onAddQuickNote,
   onPrintSingle,
   onResetFilters,
@@ -439,6 +441,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
                         isExpanded={expandedIds.has(notif.id)}
                         onToggleExpand={handleToggleExpand}
                         onEdit={onEdit}
+                        onDelete={onDelete}
                         onAddQuickNote={onAddQuickNote}
                         onPrintSingle={onPrintSingle}
                         onUpdateLocalizacao={onUpdateLocalizacao}
@@ -621,6 +624,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
                           isExpanded={expandedIds.has(notif.id)}
                           onToggleExpand={handleToggleExpand}
                           onEdit={onEdit}
+                          onDelete={onDelete}
                           onAddQuickNote={onAddQuickNote}
                           onPrintSingle={onPrintSingle}
                           onUpdateLocalizacao={onUpdateLocalizacao}
@@ -743,6 +747,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
                           isExpanded={expandedIds.has(notif.id)}
                           onToggleExpand={handleToggleExpand}
                           onEdit={onEdit}
+                          onDelete={onDelete}
                           onAddQuickNote={onAddQuickNote}
                           onPrintSingle={onPrintSingle}
                           onUpdateLocalizacao={onUpdateLocalizacao}

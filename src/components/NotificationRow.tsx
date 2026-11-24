@@ -3,13 +3,14 @@ import { BuildingNotification } from '../types';
 import { formatDateBR, formatProcesso, formatProcessoNumeroAno, calcularPrazoProcesso } from '../utils/helpers';
 import { cleanProcessLinkValue, ProcessLinkInfo } from '../utils/processLinks';
 import { RowExpandedDetails } from './RowExpandedDetails';
-import { ChevronDown, ChevronUp, AlertCircle, CheckCircle2, FileText, Clock, Link2, ArrowRight, CornerDownRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, AlertCircle, CheckCircle2, FileText, Clock, Link2, ArrowRight, CornerDownRight, Trash2 } from 'lucide-react';
 
 interface NotificationRowProps {
   notification: BuildingNotification;
   isExpanded: boolean;
   onToggleExpand: (id: string) => void;
   onEdit: (notification: BuildingNotification) => void;
+  onDelete?: (notification: BuildingNotification) => void;
   onAddQuickNote: (id: string, noteText: string, author: string) => void;
   onPrintSingle: (notification: BuildingNotification) => void;
   onUpdateLocalizacao?: (id: string, newLoc: string) => void;
@@ -111,6 +112,7 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
   isExpanded,
   onToggleExpand,
   onEdit,
+  onDelete,
   onAddQuickNote,
   onPrintSingle,
   onUpdateLocalizacao,
@@ -575,6 +577,20 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
             <button type="button" onClick={() => onEdit(notification)} className="text-blue-700 hover:text-blue-900 font-medium hover:underline cursor-pointer">
               Editar
             </button>
+            {onDelete && (
+              <button
+                type="button"
+                onClick={() => onDelete(notification)}
+                title="Excluir processo"
+                aria-label={`Excluir processo ${formatProcessoNumeroAno(
+                  notification.processo !== undefined ? notification.processo : notification.numero,
+                  { ano: notification.anoExercicio, dataRef: notification.dataEntrada || notification.dataExpedicao }
+                )}`}
+                className="p-1.5 rounded-md text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </td>
       </tr>

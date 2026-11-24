@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
-import { ShieldCheck, LogIn, Cloud, Lock, CalendarRange, AlertCircle } from 'lucide-react';
-import { signInWithGoogle, AUTHORIZED_EMAIL } from '../firebase';
+import {
+  ShieldCheck,
+  LogIn,
+  Cloud,
+  Lock,
+  CalendarRange,
+  AlertCircle,
+  Copy,
+  Check,
+  ExternalLink,
+} from 'lucide-react';
+import { signInWithGoogle, AUTHORIZED_EMAIL, firebaseConfig } from '../firebase';
 
 interface AuthGateProps {
   onError?: (message: string) => void;
@@ -9,11 +19,27 @@ interface AuthGateProps {
 export const AuthGate: React.FC<AuthGateProps> = ({ onError }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [unauthorizedHost, setUnauthorizedHost] = useState<string | null>(null);
+  const [copiedHost, setCopiedHost] = useState(false);
+
+  const firebaseAuthSettingsUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+
+  const handleCopyHost = async () => {
+    if (!unauthorizedHost) return;
+    try {
+      await navigator.clipboard.writeText(unauthorizedHost);
+      setCopiedHost(true);
+      window.setTimeout(() => setCopiedHost(false), 2000);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
 
   const handleLogin = async () => {
     if (isLoading) return;
     setIsLoading(true);
     setErrorMsg(null);
+    setUnauthorizedHost(null);
     try {
       await signInWithGoogle();
     } catch (err: any) {
@@ -26,7 +52,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onError }) => {
       } else if (code === 'auth/popup-blocked') {
         msg = 'O navegador bloqueou a janela pop-up de login. Permita pop-ups para este site e tente novamente.';
       } else if (code === 'auth/unauthorized-domain') {
-        msg = `Domínio "${currentHost}" ainda não autorizado no Firebase Authentication. Adicione "${currentHost}" em Firebase Console → Authentication → Settings → Authorized domains (projeto durable-reflection-cv0ns).`;
+        setUnauthorizedHost(currentHost);
+        msg = `Domínio "${currentHost}" ainda não autorizado no Firebase Authentication (projeto ${firebaseConfig.projectId}).`;
       } else if (code === 'auth/unauthorized-email') {
         msg = err?.message || `Acesso restrito ao e-mail autorizado (${AUTHORIZED_EMAIL}).`;
       } else {
@@ -106,9 +133,51 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onError }) => {
           </div>
 
           {errorMsg && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span className="font-medium leading-relaxed">{errorMsg}</span>
+              </div>
+
+              {unauthorizedHost && (
+                <div className="pl-6 space-y-2 text-[11px] text-rose-900">
+                  <p>
+                    1. Copie o domínio abaixo e adicione em{' '}
+                    <strong>Authentication → Settings → Authorized domains</strong>:
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <code className="flex-1 px-2 py-1 rounded bg-white border border-rose-200 font-mono text-[11px] text-slate-800 truncate">
+                      {unauthorizedHost}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyHost()}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white hover:bg-rose-100 border border-rose-300 text-rose-800 font-semibold cursor-pointer shrink-0"
+                    >
+                      {copiedHost ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span>Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <a
+                    href={firebaseAuthSettingsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 font-semibold text-rose-800 underline hover:text-rose-950"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Abrir Configurações de Auth no Firebase Console</span>
+                  </a>
+                </div>
+              )}
             </div>
           )}
 
