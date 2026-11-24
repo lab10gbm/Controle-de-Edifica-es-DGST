@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   BuildingNotification, 
   StatusType, 
   DocumentType 
 } from '../types';
 import { OBM_LIST, STATUS_LIST, LOCALIZACAO_LIST, TIPOS_PROCESSO_LIST } from '../data/initialData';
-import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero } from '../utils/helpers';
+import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST } from '../utils/helpers';
 import { cleanProcessLinkValue } from '../utils/processLinks';
 import { 
   X, 
@@ -21,7 +21,8 @@ import {
   ShieldCheck,
   Check,
   Clock,
-  Link2
+  Link2,
+  ArrowLeftRight
 } from 'lucide-react';
 
 interface RecordModalProps {
@@ -44,6 +45,15 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   // Form State
   const [numero, setNumero] = useState<number>(nextNumber);
   const [processo, setProcesso] = useState<string>('');
+  const [is4BlocksMode, setIs4BlocksMode] = useState<boolean>(true);
+  const [blocoPrefixo, setBlocoPrefixo] = useState<string>('E27');
+  const [blocoNumero, setBlocoNumero] = useState<string>('');
+  const [blocoCodigo, setBlocoCodigo] = useState<string>('');
+  const [blocoAno, setBlocoAno] = useState<string>(() => getTodayISO().slice(0, 4));
+  const blocoPrefixoRef = useRef<HTMLInputElement>(null);
+  const blocoNumeroRef = useRef<HTMLInputElement>(null);
+  const blocoCodigoRef = useRef<HTMLInputElement>(null);
+  const blocoAnoRef = useRef<HTMLInputElement>(null);
   const [codigoDocumento, setCodigoDocumento] = useState('');
   const [edificacao, setEdificacao] = useState('');
   const [requerente, setRequerente] = useState('');
@@ -94,17 +104,66 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   // Errors
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const syncTipoByCodigo = (codigoDigits: string, baseDate = dataExpedicao) => {
+    const matchedTipo = getTipoPorCodigo(codigoDigits, tipoProcesso);
+    if (matchedTipo && matchedTipo !== tipoProcesso) {
+      setTipoProcesso(matchedTipo);
+      const dias = getDiasPrazoPorTipo(matchedTipo);
+      const prazoCalc = adicionarDiasAData(baseDate, dias);
+      if (prazoCalc.dataISO) {
+        setDataValidade(prazoCalc.dataISO);
+      }
+    }
+  };
+
   const handleTipoProcessoChange = (novoTipo: string) => {
+    const prevDefaultCode = getCodigoPorTipo(tipoProcesso, dataExpedicao);
+    const nextDefaultCode = getCodigoPorTipo(novoTipo, dataExpedicao);
     setTipoProcesso(novoTipo);
+
     const dias = getDiasPrazoPorTipo(novoTipo);
     const prazoCalc = adicionarDiasAData(dataExpedicao, dias);
     if (prazoCalc.dataISO) {
       setDataValidade(prazoCalc.dataISO);
     }
+
+    const curCod = blocoCodigo.trim();
+    const shouldSyncCode =
+      !curCod ||
+      curCod === prevDefaultCode ||
+      getTipoPorCodigo(curCod, novoTipo) !== null;
+
+    if (shouldSyncCode) {
+      setBlocoCodigo(nextDefaultCode);
+      if (!is4BlocksMode && nextDefaultCode) {
+        const parsedProc = parseProcessoE27(processo);
+        if (parsedProc?.isE27 && parsedProc.ano) {
+          setProcesso(`E27/${parsedProc.numeroPadded}/${nextDefaultCode}/${parsedProc.ano}`);
+        }
+      }
+    }
+  };
+
+  const handleBlocoCodigoChange = (raw: string) => {
+    const hasSlash = raw.includes('/');
+    const digits = raw.replace(/[^\d]/g, '').slice(0, 6);
+    setBlocoCodigo(digits);
+    syncTipoByCodigo(digits);
+    if (hasSlash) {
+      blocoAnoRef.current?.focus();
+    }
   };
 
   const handleDataEntradaChange = (novaData: string) => {
+    const prevDefaultCode = getCodigoPorTipo(tipoProcesso, dataExpedicao);
+    const nextDefaultCode = getCodigoPorTipo(tipoProcesso, novaData);
     setDataExpedicao(novaData);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(novaData) && !isEditing) {
+      setBlocoAno(novaData.slice(0, 4));
+      if (nextDefaultCode && (!blocoCodigo.trim() || blocoCodigo.trim() === prevDefaultCode)) {
+        setBlocoCodigo(nextDefaultCode);
+      }
+    }
     const dias = getDiasPrazoPorTipo(tipoProcesso);
     const prazoCalc = adicionarDiasAData(novaData, dias);
     if (prazoCalc.dataISO) {
@@ -112,14 +171,114 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     }
   };
 
+  const composeFromBlocks = (pref: string, num: string, cod: string, ano: string): string => {
+    const numDigits = num.replace(/[^\d]/g, '');
+    if (!numDigits) return '';
+    const prefClean = pref.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') || 'E27';
+    const codDigits = cod.replace(/[^\d]/g, '');
+    const anoDigits = ano.replace(/[^\d]/g, '');
+    const anoFinal =
+      anoDigits.length === 4
+        ? anoDigits
+        : anoDigits.length === 2
+        ? `20${anoDigits}`
+        : (dataExpedicao ? dataExpedicao.slice(0, 4) : String(new Date().getFullYear()));
+    if (codDigits) {
+      const numPadded = numDigits.length >= 4 ? numDigits : numDigits.padStart(4, '0');
+      return `${prefClean}/${numPadded}/${codDigits}/${anoFinal}`;
+    }
+    return numDigits.padStart(5, '0');
+  };
+
+  const applyValueToBlocks = (
+    rawVal: string,
+    fallbackCodigo?: string,
+    fallbackAno?: string,
+    syncTipoFromCode = false
+  ) => {
+    const trimmed = rawVal.trim().toUpperCase();
+    const partsMatch = trimmed.match(/^([A-Z]-?\d+)\s*\/\s*(\d{1,7})\s*\/\s*(\d{0,6})\s*\/\s*(\d{2,4})$/);
+    if (partsMatch) {
+      const codExtracted = partsMatch[3] || fallbackCodigo || '';
+      setBlocoPrefixo(partsMatch[1].replace('-', ''));
+      setBlocoNumero(partsMatch[2]);
+      setBlocoCodigo(codExtracted);
+      const y = partsMatch[4];
+      setBlocoAno(y.length === 2 ? `20${y}` : y);
+      if (syncTipoFromCode && codExtracted) {
+        syncTipoByCodigo(codExtracted);
+      }
+      return true;
+    }
+
+    const parsed = parseProcessoE27(trimmed, {
+      codigo: fallbackCodigo,
+      ano: fallbackAno,
+    });
+    if (parsed) {
+      const codExtracted = parsed.codigo || fallbackCodigo || '';
+      setBlocoPrefixo('E27');
+      setBlocoNumero(parsed.numeroBruto || String(parsed.numero));
+      setBlocoCodigo(codExtracted);
+      setBlocoAno(parsed.ano || fallbackAno || getTodayISO().slice(0, 4));
+      if (syncTipoFromCode && codExtracted) {
+        syncTipoByCodigo(codExtracted);
+      }
+      return true;
+    }
+
+    const onlyDigits = trimmed.replace(/[^\d]/g, '');
+    setBlocoPrefixo('E27');
+    setBlocoNumero(onlyDigits);
+    setBlocoCodigo(fallbackCodigo || '');
+    setBlocoAno(fallbackAno || getTodayISO().slice(0, 4));
+    return false;
+  };
+
+  const handleToggleCadastroLineMode = () => {
+    if (is4BlocksMode) {
+      const composed = composeFromBlocks(blocoPrefixo, blocoNumero, blocoCodigo, blocoAno);
+      setProcesso(composed);
+      setIs4BlocksMode(false);
+    } else {
+      const fallbackAno = dataExpedicao ? dataExpedicao.slice(0, 4) : getTodayISO().slice(0, 4);
+      applyValueToBlocks(
+        processo,
+        blocoCodigo || editingRecord?.detalhesSST?.codigo || getCodigoPorTipo(tipoProcesso, dataExpedicao),
+        fallbackAno,
+        true
+      );
+      setIs4BlocksMode(true);
+    }
+  };
+
   useEffect(() => {
     if (editingRecord) {
       setNumero(editingRecord.numero);
-      setProcesso(
-        editingRecord.processo !== undefined 
-          ? (editingRecord.processo || '') 
-          : (editingRecord.numero ? String(editingRecord.numero).padStart(5, '0') : '')
-      );
+      const rawProcVal =
+        editingRecord.processo !== undefined
+          ? (editingRecord.processo || '')
+          : (editingRecord.numero ? String(editingRecord.numero).padStart(5, '0') : '');
+      setProcesso(rawProcVal);
+
+      const fallbackAnoEdit =
+        editingRecord.anoExercicio ||
+        (editingRecord.dataEntrada || editingRecord.dataExpedicao || '').match(/\b(20\d{2})\b/)?.[1] ||
+        getTodayISO().slice(0, 4);
+      const fallbackCodEdit = editingRecord.detalhesSST?.codigo || '';
+      const parsedEdit = parseProcessoE27(rawProcVal, {
+        codigo: fallbackCodEdit,
+        ano: fallbackAnoEdit,
+      });
+
+      const isNonStandardText =
+        Boolean(rawProcVal.trim()) &&
+        rawProcVal.trim().toUpperCase() !== 'S/N' &&
+        !parsedEdit;
+
+      setIs4BlocksMode(!isNonStandardText);
+      applyValueToBlocks(rawProcVal, fallbackCodEdit, fallbackAnoEdit);
+
       setCodigoDocumento(editingRecord.codigoDocumento || '');
       setEdificacao(editingRecord.edificacao || '');
       setRequerente(editingRecord.requerente || editingRecord.edificacao || '');
@@ -186,8 +345,15 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setJustificativaAlteracao('');
     } else {
       // New record - limpo e pronto para preenchimento, SEM inventar dados
+      const hojeISO = getTodayISO();
+      const anoAtual = hojeISO.slice(0, 4);
       setNumero(nextNumber);
       setProcesso('');
+      setIs4BlocksMode(true);
+      setBlocoPrefixo('E27');
+      setBlocoNumero('');
+      setBlocoCodigo(getCodigoPorTipo('CERTIFICADO DE APROVAÇÃO'));
+      setBlocoAno(anoAtual);
       setCodigoDocumento('');
       setEdificacao('');
       setRequerente('');
@@ -204,7 +370,6 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setStatus('Notificação');
       setTipoDocumento('Notificação');
       setObm('10º GBM - ANGRA DOS REIS');
-      const hojeISO = getTodayISO();
       setDataExpedicao(hojeISO);
       
       const prazoInicial = adicionarDiasAData(hojeISO, getDiasPrazoPorTipo('CERTIFICADO DE APROVAÇÃO'));
@@ -266,14 +431,21 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     e.preventDefault();
     if (!validate()) return;
 
-    const cleanProcesso = processo.trim().toUpperCase();
+    const cleanProcesso = is4BlocksMode
+      ? composeFromBlocks(blocoPrefixo, blocoNumero, blocoCodigo, blocoAno)
+      : processo.trim().toUpperCase();
     const parsedE27 = parseProcessoE27(cleanProcesso);
     const formattedProcesso = parsedE27?.formattedE27
       ? parsedE27.formattedE27
       : cleanProcesso
       ? (/^\d+$/.test(cleanProcesso) ? cleanProcesso.padStart(5, '0') : cleanProcesso)
       : '';
-    const extractedNum = extractProcessoNumero(formattedProcesso) || numero;
+    const extractedNum = is4BlocksMode
+      ? (parseInt(blocoNumero.replace(/[^\d]/g, ''), 10) || numero)
+      : (extractProcessoNumero(formattedProcesso) || numero);
+    const finalCodigoSST = is4BlocksMode
+      ? blocoCodigo.replace(/[^\d]/g, '')
+      : (parsedE27?.codigo || editingRecord?.detalhesSST?.codigo || '');
     const finalProcAdm =
       processoAdministrativo.trim() ||
       (parsedE27?.formattedE27 ? parsedE27.formattedE27 : undefined);
@@ -345,7 +517,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       ownerUid: editingRecord?.ownerUid,
       detalhesSST: {
         ...(editingRecord?.detalhesSST || {}),
-        ...(parsedE27?.codigo ? { codigo: parsedE27.codigo } : {}),
+        codigo: finalCodigoSST,
         entradaSST: formatDateBR(dataExpedicao),
         localizacao: localizacao.trim(),
         docGerado: docGerado.trim() || editingRecord?.detalhesSST?.docGerado || '',
@@ -403,59 +575,212 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               <span>1. Identificação do Processo e Requerente</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <div className="flex items-center justify-between mb-1">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+              <div className="sm:col-span-5">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1">
                   <label className="block text-xs font-semibold text-slate-700">
                     Número do Processo <span className="text-slate-400 font-normal text-[11px]">(opcional)</span>
                   </label>
-                  {processo ? (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setProcesso('')}
-                      className="text-[11px] text-red-600 hover:text-red-700 hover:underline cursor-pointer font-medium"
-                      title="Zerar campo do processo"
-                    >
-                      Zerar campo
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setProcesso(String(nextNumber).padStart(5, '0'))}
-                      className="text-[11px] text-blue-600 hover:text-blue-700 hover:underline cursor-pointer font-medium"
-                      title="Preencher com sugestão sequencial"
-                    >
-                      Sugerir ({String(nextNumber).padStart(5, '0')})
-                    </button>
-                  )}
-                </div>
-                <input
-                  type="text"
-                  maxLength={32}
-                  value={processo}
-                  onChange={(e) => {
-                    const val = e.target.value.toUpperCase().replace(/[^A-Z0-9/-]/g, '').slice(0, 32);
-                    setProcesso(val);
-                  }}
-                  onBlur={() => {
-                    if (processo.trim()) {
-                      const parsed = parseProcessoE27(processo);
-                      if (parsed?.formattedE27) {
-                        setProcesso(parsed.formattedE27);
-                      } else if (/^\d+$/.test(processo.trim())) {
-                        setProcesso(processo.trim().padStart(5, '0'));
+                      onClick={handleToggleCadastroLineMode}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:text-blue-800 bg-slate-100 hover:bg-blue-50 border border-slate-300 hover:border-blue-300 rounded transition-colors cursor-pointer"
+                      title={
+                        is4BlocksMode
+                          ? 'Alternar para linha única de cadastro (campo livre)'
+                          : 'Separar em 4 blocos: E27 / Processo / Código / Ano'
                       }
-                    }
-                  }}
-                  placeholder="Ex: E27/0134/11210/2026 ou S/N"
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-red-600 text-slate-900 font-mono font-bold placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Padrão oficial <code className="font-mono">E27/PROC/COD/ANO</code> ou deixe em branco (S/N).
-                </p>
+                    >
+                      <ArrowLeftRight className="w-3 h-3" />
+                      <span>{is4BlocksMode ? 'Alterar linha (Campo único)' : 'Alterar linha (4 blocos)'}</span>
+                    </button>
+
+                    {(is4BlocksMode ? blocoNumero : processo) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProcesso('');
+                          setBlocoNumero('');
+                          setBlocoCodigo('');
+                        }}
+                        className="text-[11px] text-red-600 hover:text-red-700 hover:underline cursor-pointer font-medium"
+                        title="Zerar campo do processo"
+                      >
+                        Zerar
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sug = String(nextNumber).padStart(5, '0');
+                          setProcesso(sug);
+                          setBlocoNumero(sug);
+                        }}
+                        className="text-[11px] text-blue-600 hover:text-blue-700 hover:underline cursor-pointer font-medium"
+                        title="Preencher com sugestão sequencial"
+                      >
+                        Sugerir ({String(nextNumber).padStart(5, '0')})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {is4BlocksMode ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 focus-within:bg-white focus-within:ring-1 focus-within:ring-red-600 focus-within:border-red-600 transition-colors">
+                      <input
+                        ref={blocoPrefixoRef}
+                        type="text"
+                        maxLength={6}
+                        value={blocoPrefixo}
+                        aria-label="Órgão / Prefixo do Processo"
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw.includes('/')) {
+                            const [head, ...rest] = raw.split('/');
+                            if (rest.some((r) => r.trim().length > 0)) {
+                              applyValueToBlocks(raw, blocoCodigo, blocoAno, true);
+                              return;
+                            }
+                            setBlocoPrefixo(head.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+                            blocoNumeroRef.current?.focus();
+                            return;
+                          }
+                          setBlocoPrefixo(raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+                        }}
+                        onPaste={(e) => {
+                          const text = e.clipboardData.getData('text');
+                          if (text.includes('/')) {
+                            e.preventDefault();
+                            applyValueToBlocks(text, blocoCodigo, blocoAno, true);
+                          }
+                        }}
+                        placeholder="E27"
+                        className="w-12 px-1.5 py-1 text-center text-xs sm:text-sm bg-white border border-slate-200 rounded font-mono font-bold text-slate-900 focus:outline-none focus:border-red-500"
+                      />
+                      <span className="text-slate-400 font-mono font-bold select-none">/</span>
+                      <input
+                        ref={blocoNumeroRef}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={32}
+                        value={blocoNumero}
+                        aria-label="Número do Processo"
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw.includes('/')) {
+                            const cleanParts = raw.split('/').map((s) => s.trim()).filter(Boolean);
+                            if (cleanParts.length >= 3) {
+                              applyValueToBlocks(raw, blocoCodigo, blocoAno, true);
+                              return;
+                            }
+                            setBlocoNumero(cleanParts[0]?.replace(/[^\d]/g, '').slice(0, 7) || '');
+                            blocoCodigoRef.current?.focus();
+                            return;
+                          }
+                          setBlocoNumero(raw.replace(/[^\d]/g, '').slice(0, 7));
+                        }}
+                        onPaste={(e) => {
+                          const text = e.clipboardData.getData('text');
+                          if (text.includes('/')) {
+                            e.preventDefault();
+                            applyValueToBlocks(text, blocoCodigo, blocoAno, true);
+                          }
+                        }}
+                        placeholder="73510"
+                        className="min-w-0 flex-1 px-2 py-1 text-center text-xs sm:text-sm bg-white border border-slate-200 rounded font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-red-500"
+                      />
+                      <span className="text-slate-400 font-mono font-bold select-none">/</span>
+                      <input
+                        ref={blocoCodigoRef}
+                        type="text"
+                        inputMode="numeric"
+                        list="sst-codigos-sugeridos"
+                        maxLength={6}
+                        value={blocoCodigo}
+                        aria-label="Código SST"
+                        onChange={(e) => handleBlocoCodigoChange(e.target.value)}
+                        placeholder="11075"
+                        title="Código vinculado ao Tipo de Processo (ex: 11075 = Autorização de Evento)"
+                        className="w-[68px] px-1.5 py-1 text-center text-xs sm:text-sm bg-white border border-slate-200 rounded font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-red-500"
+                      />
+                      <span className="text-slate-400 font-mono font-bold select-none">/</span>
+                      <input
+                        ref={blocoAnoRef}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={blocoAno}
+                        aria-label="Ano do Processo"
+                        onChange={(e) => setBlocoAno(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+                        placeholder="2026"
+                        className="w-[54px] px-1.5 py-1 text-center text-xs sm:text-sm bg-white border border-slate-200 rounded font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-red-500"
+                      />
+                    </div>
+                    <datalist id="sst-codigos-sugeridos">
+                      {CODIGOS_PROCESSO_LIST.map((item) => (
+                        <option key={item.codigo} value={item.codigo}>
+                          {item.codigo} - {item.titulo}{item.observacao ? ` (${item.observacao})` : ''}
+                        </option>
+                      ))}
+                    </datalist>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 px-0.5">
+                      <span>Órgão / Nº Processo / Cód. / Ano</span>
+                      {blocoNumero.trim() && (
+                        <span className="font-mono font-semibold text-blue-800">
+                          {composeFromBlocks(blocoPrefixo, blocoNumero, blocoCodigo, blocoAno)}
+                        </span>
+                      )}
+                    </div>
+                    {(() => {
+                      const infoCod = getDescricaoCodigoSST(blocoCodigo);
+                      if (!infoCod) return null;
+                      return (
+                        <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1 leading-snug">
+                          <span className="font-mono font-bold text-slate-800">{infoCod.codigo}</span>: {infoCod.titulo}
+                          {infoCod.observacao && (
+                            <span className="text-slate-500"> ({infoCod.observacao})</span>
+                          )}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div>
+                    <input
+                      type="text"
+                      maxLength={32}
+                      value={processo}
+                      onChange={(e) => {
+                        const val = e.target.value.toUpperCase().replace(/[^A-Z0-9/-]/g, '').slice(0, 32);
+                        setProcesso(val);
+                      }}
+                      onBlur={() => {
+                        if (processo.trim()) {
+                          const parsed = parseProcessoE27(processo);
+                          if (parsed?.formattedE27) {
+                            setProcesso(parsed.formattedE27);
+                            if (parsed.codigo) {
+                              setBlocoCodigo(parsed.codigo);
+                              syncTipoByCodigo(parsed.codigo);
+                            }
+                          } else if (/^\d+$/.test(processo.trim())) {
+                            setProcesso(processo.trim().padStart(5, '0'));
+                          }
+                        }
+                      }}
+                      placeholder="Ex: 73510 ou E27/73510/11075/2026"
+                      className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-red-600 text-slate-900 font-mono font-bold placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Digite apenas o número (ex: <code className="font-mono">73510</code>) e clique em <strong>Alterar linha (4 blocos)</strong> se quiser separar.
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-7">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Requerente (Nome / Razão Social) <span className="text-red-600">*</span>
                 </label>
@@ -476,7 +801,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 )}
               </div>
 
-              <div>
+              <div className="sm:col-span-4">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Tipo de Processo (TIPO) <span className="text-red-600">*</span>
                 </label>
@@ -494,12 +819,19 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                     <option value={tipoProcesso}>{tipoProcesso}</option>
                   )}
                 </select>
-                <p className="text-[11px] text-blue-700 font-medium mt-1">
-                  Prazo legal deste tipo: <strong>{getDiasPrazoPorTipo(tipoProcesso)} dias</strong>
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] mt-1">
+                  <span className="text-blue-700 font-medium">
+                    Prazo legal: <strong>{getDiasPrazoPorTipo(tipoProcesso)} dias</strong>
+                  </span>
+                  {getCodigoPorTipo(tipoProcesso, dataExpedicao) && (
+                    <span className="text-slate-600 font-mono">
+                      Cód. E27: <strong className="text-slate-900">{getCodigoPorTipo(tipoProcesso, dataExpedicao)}</strong>
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div>
+              <div className="sm:col-span-4">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Origem do Processo (ORIGEM)
                 </label>
@@ -512,7 +844,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-4">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Unidade / OBM <span className="text-red-600">*</span>
                 </label>

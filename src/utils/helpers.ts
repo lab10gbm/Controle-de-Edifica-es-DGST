@@ -90,6 +90,184 @@ export function getDiasPrazoPorTipo(tipo?: string | null): number {
   return 15;
 }
 
+export const CODIGO_POR_TIPO: Record<string, string> = {
+  'AUTORIZAÇÃO DE EVENTO': '11075',
+  'CERTIFICADO DE APROVAÇÃO': '11220',
+  'LAUDO DE EXIGENCIAS': '11220',
+  'MODIFICAÇÃO ITEM DE LE': '11220',
+  'CERTIFICADO DE DESPACHO': '11210',
+  'EMPRESTIMO DE PLANTA': '',
+  'ACRESCIMO DE AREA': '11220',
+  'PRORROGAÇÃO DE PRAZO': '11220',
+  'BAIXA DE NOTIFICAÇÃO': '11220',
+};
+
+export interface CodigoProcessoCatalogo {
+  codigo: string;
+  titulo: string;
+  observacao?: string;
+}
+
+export const CODIGOS_PROCESSO_LIST: ReadonlyArray<CodigoProcessoCatalogo> = [
+  { codigo: '00116', titulo: 'LPCI' },
+  { codigo: '11070', titulo: 'Certificado de Vistoria Anual' },
+  { codigo: '11075', titulo: 'Autorização (Autorização de Evento)' },
+  { codigo: '11077', titulo: 'FARE' },
+  {
+    codigo: '11210',
+    titulo: 'Análise prévia / Parecer Técnico, 2ª via de LE, CA parcial, Quiosque, Modificação de item/projeto e regularização física',
+    observacao: 'Site telefonia até 31/03/2026; Acréscimo/Decréscimo até 28/02/2026; Análise de projeto até 31/01/2026; CA até 31/10/2025',
+  },
+  {
+    codigo: '11213',
+    titulo: 'Prorrogação de prazo de notificação',
+    observacao: 'Válido até 30/04/2026 (após: Portal 11220)',
+  },
+  {
+    codigo: '11215',
+    titulo: 'Desinterdição, impugnação/recurso, baixa de notificação ou etapa de cronograma',
+    observacao: 'Válido até 30/04/2026 (após: Portal 11220)',
+  },
+  {
+    codigo: '11217',
+    titulo: 'Processos simplificados',
+    observacao: 'Somente via JUCERJA ou RCPJ',
+  },
+  {
+    codigo: '11218',
+    titulo: 'Termo de Ajustamento de Conduta (TAC)',
+    observacao: 'Válido até 30/04/2026 (após: Portal 11220)',
+  },
+  {
+    codigo: '11219',
+    titulo: 'Cadastramento de profissionais e empresas via Portal do Requerente',
+  },
+  {
+    codigo: '11220',
+    titulo: 'Processo Digital (novo Portal do Requerente)',
+    observacao: 'Entrada exclusivamente pelo Portal do Requerente',
+  },
+];
+
+export function getDescricaoCodigoSST(codigo?: string | null): CodigoProcessoCatalogo | null {
+  const digits = String(codigo || '').replace(/[^\d]/g, '');
+  if (!digits) return null;
+  return CODIGOS_PROCESSO_LIST.find((item) => item.codigo === digits) || null;
+}
+
+function toIsoDateSafe(dataStr?: string | null): string {
+  if (!dataStr) return '';
+  const trimmed = dataStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const [d, m, y] = trimmed.split('/');
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return '';
+}
+
+/**
+ * Retorna o código padrão do segmento E27/PROC/COD/ANO correspondente ao Tipo de Processo,
+ * considerando as datas-limite de transição da DGST para o Portal do Requerente (11220).
+ */
+export function getCodigoPorTipo(tipo?: string | null, dataEntrada?: string | null): string {
+  if (!tipo) return '';
+  const norm = tipo
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+
+  const dataISO = toIsoDateSafe(dataEntrada) || getTodayISO();
+
+  if (norm.includes('AUTORIZACAO DE EVENTO') || norm.includes('EVENTO')) {
+    return '11075';
+  }
+  if (norm.includes('PRORROGACAO DE PRAZO') || norm.includes('PRORROGACAO')) {
+    return dataISO <= '2026-04-30' ? '11213' : '11220';
+  }
+  if (norm.includes('BAIXA DE NOTIFICACAO') || norm.includes('BAIXA')) {
+    return dataISO <= '2026-04-30' ? '11215' : '11220';
+  }
+  if (norm.includes('CERTIFICADO DE DESPACHO') || norm.includes('DESPACHO')) {
+    return '11210';
+  }
+  if (norm.includes('EMPRESTIMO DE PLANTA') || norm.includes('PLANTA')) {
+    return '';
+  }
+  if (norm.includes('CERTIFICADO DE APROVACAO') || norm.includes('APROVACAO')) {
+    return dataISO <= '2025-10-31' ? '11210' : '11220';
+  }
+  if (norm.includes('LAUDO DE EXIGENCIA') || norm.includes('LAUDO')) {
+    return dataISO <= '2026-01-31' ? '11210' : '11220';
+  }
+  if (norm.includes('ACRESCIMO DE AREA') || norm.includes('ACRESCIMO')) {
+    return dataISO <= '2026-02-28' ? '11210' : '11220';
+  }
+  if (norm.includes('MODIFICACAO ITEM') || norm.includes('ITEM DE LE')) {
+    return '11220';
+  }
+
+  return '';
+}
+
+/**
+ * Dado o código numérico do 3º bloco (ex: 11075), retorna o Tipo de Processo correspondente.
+ * Quando um código abrange múltiplos tipos (ex: 11210 ou 11220) e o tipo atual
+ * já é compatível com esse código, retorna null para preservar a seleção do usuário.
+ */
+export function getTipoPorCodigo(
+  codigo?: string | null,
+  currentTipo?: string | null
+): string | null {
+  const digits = String(codigo || '').replace(/[^\d]/g, '');
+  if (!digits) return null;
+
+  const normCurrent = String(currentTipo || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+
+  if (digits === '11075') {
+    return 'AUTORIZAÇÃO DE EVENTO';
+  }
+  if (digits === '11213') {
+    return 'PRORROGAÇÃO DE PRAZO';
+  }
+  if (digits === '11215') {
+    return 'BAIXA DE NOTIFICAÇÃO';
+  }
+  if (digits === '11210') {
+    if (
+      normCurrent.includes('LAUDO') ||
+      normCurrent.includes('DESPACHO') ||
+      normCurrent.includes('MODIFICACAO') ||
+      normCurrent.includes('ACRESCIMO') ||
+      normCurrent.includes('APROVACAO')
+    ) {
+      return null;
+    }
+    return 'LAUDO DE EXIGENCIAS';
+  }
+  if (digits === '11220') {
+    if (
+      normCurrent.includes('APROVACAO') ||
+      normCurrent.includes('LAUDO') ||
+      normCurrent.includes('MODIFICACAO') ||
+      normCurrent.includes('ACRESCIMO') ||
+      normCurrent.includes('DESPACHO') ||
+      normCurrent.includes('PRORROGACAO') ||
+      normCurrent.includes('BAIXA')
+    ) {
+      return null;
+    }
+    return 'CERTIFICADO DE APROVAÇÃO';
+  }
+
+  return null;
+}
+
 /**
  * Adiciona uma quantidade de dias a uma data (suporta DD/MM/AAAA, YYYY-MM-DD e DD/MM).
  * Garante fidelidade ao exemplo: 01/10/2026 + 30 dias = 31/10/2026.
