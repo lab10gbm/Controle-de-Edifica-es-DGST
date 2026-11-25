@@ -22,6 +22,7 @@ import { FiscalizacaoRecord, FiscalizacaoStatus } from '../../types/fiscalizacao
 
 interface FiscalizacaoRowProps {
   record: FiscalizacaoRecord;
+  displayNumero?: string;
   onEdit: (record: FiscalizacaoRecord) => void;
   onDelete: (record: FiscalizacaoRecord) => void;
   onPrintSingle: (record: FiscalizacaoRecord) => void;
@@ -77,8 +78,32 @@ export function getFiscalizacaoStatusBadge(status: FiscalizacaoStatus) {
   }
 }
 
+function getAtoBadgeClass(tipoAto: string): string {
+  const norm = String(tipoAto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (norm.includes('encerrad') || norm.includes('encerrament')) {
+    return 'text-emerald-800 bg-emerald-50 border-emerald-200';
+  }
+  if (norm.includes('cancelad') || norm.includes('cancelament')) {
+    return 'text-slate-700 bg-slate-200 border-slate-300';
+  }
+  if (norm.includes('interdic')) {
+    return 'text-rose-800 bg-rose-50 border-rose-200';
+  }
+  if (norm.includes('tac')) {
+    return 'text-indigo-800 bg-indigo-50 border-indigo-200';
+  }
+  if (norm.includes('notificac')) {
+    return 'text-sky-800 bg-sky-50 border-sky-200';
+  }
+  return 'text-amber-800 bg-amber-50 border-amber-200';
+}
+
 export const FiscalizacaoRow: React.FC<FiscalizacaoRowProps> = ({
   record,
+  displayNumero,
   onEdit,
   onDelete,
   onPrintSingle,
@@ -136,8 +161,15 @@ export const FiscalizacaoRow: React.FC<FiscalizacaoRowProps> = ({
                 <ChevronRight className="w-4 h-4" />
               )}
             </button>
-            <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
-              #{String(record.codigo).padStart(4, '0')}
+            <span
+              title={
+                displayNumero
+                  ? `Sequencial anual ${displayNumero} · Registro geral #${String(record.codigo).padStart(4, '0')}`
+                  : `Registro geral #${String(record.codigo).padStart(4, '0')}`
+              }
+              className="font-mono text-xs font-bold text-slate-800 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded"
+            >
+              {displayNumero || `#${String(record.codigo).padStart(4, '0')}`}
             </span>
           </div>
         </td>
@@ -346,7 +378,9 @@ export const FiscalizacaoRow: React.FC<FiscalizacaoRowProps> = ({
                               <span className="font-mono font-bold text-slate-900">
                                 {ato.data || '00/00/0000'}
                               </span>
-                              <span className="font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[11px]">
+                              <span
+                                className={`font-semibold border px-1.5 py-0.5 rounded text-[11px] ${getAtoBadgeClass(ato.tipoAto)}`}
+                              >
                                 {ato.tipoAto}
                               </span>
                               {ato.numeroAto && (

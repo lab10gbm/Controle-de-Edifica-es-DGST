@@ -43,9 +43,11 @@ import {
   BarChart3,
   Layers,
   FileWarning,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { FiscalizacaoRecord } from './types/fiscalizacao';
 import { FiscalizacoesWorkspace } from './components/fiscalizacao/FiscalizacoesWorkspace';
+import { FiscalizacaoStatisticalDashboard } from './components/fiscalizacao/FiscalizacaoStatisticalDashboard';
 import {
   batchImportFiscalizacoesToFirestore,
   clearAllFiscalizacoesInFirestore,
@@ -436,13 +438,18 @@ export default function App() {
 
   // Active Workspace View ('listagem' | 'relatorios' | 'notificacoes')
   const [activeView, setActiveView] = useState<'listagem' | 'relatorios' | 'notificacoes'>('listagem');
+  const [reportModality, setReportModality] = useState<'processos' | 'fiscalizacao'>('processos');
 
   // Lazy-live subscription para Fiscalizações / Notificações (economiza cota Spark quando não acessado)
   useEffect(() => {
-    if (activeView === 'notificacoes' && !hasActivatedNotificacoesTab) {
+    if (
+      (activeView === 'notificacoes' ||
+        (activeView === 'relatorios' && reportModality === 'fiscalizacao')) &&
+      !hasActivatedNotificacoesTab
+    ) {
       setHasActivatedNotificacoesTab(true);
     }
-  }, [activeView, hasActivatedNotificacoesTab]);
+  }, [activeView, reportModality, hasActivatedNotificacoesTab]);
 
   useEffect(() => {
     if (!authReady || !user || !hasActivatedNotificacoesTab) return;
@@ -1085,7 +1092,12 @@ export default function App() {
           onSignOut={handleSignOut}
           selectedYear={selectedYear}
           availableYears={availableYears}
-          onSelectYear={activeView !== 'notificacoes' ? setSelectedYear : undefined}
+          onSelectYear={
+            activeView !== 'notificacoes' &&
+            !(activeView === 'relatorios' && reportModality === 'fiscalizacao')
+              ? setSelectedYear
+              : undefined
+          }
           isSyncing={isSyncing || isFiscalizacoesLoading}
         />
       </div>
@@ -1239,12 +1251,118 @@ export default function App() {
             />
           </>
         ) : activeView === 'relatorios' ? (
-          <StatisticalReportDashboard
-            notifications={notifications}
-            selectedYear={selectedYear}
-            availableYears={availableYears}
-            onEditRecord={handleEdit}
-          />
+          <div className="space-y-4">
+            {/* Seletor / Botão de Intercâmbio de Modalidade Estatística (Assuntos Separados) */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-3 sm:px-4 sm:py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 print:hidden">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 mr-1">
+                  Modalidade Estatística:
+                </span>
+                <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 border border-slate-200 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setReportModality('processos')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                      reportModality === 'processos'
+                        ? 'bg-red-700 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Processos Administrativos</span>
+                    <span
+                      className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded ${
+                        reportModality === 'processos'
+                          ? 'bg-red-900/60 text-white'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {notifications.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasActivatedNotificacoesTab(true);
+                      setReportModality('fiscalizacao');
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                      reportModality === 'fiscalizacao'
+                        ? 'bg-amber-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    }`}
+                  >
+                    <FileWarning className="w-3.5 h-3.5" />
+                    <span>Fiscalizações</span>
+                    {fiscalizacoes.length > 0 && (
+                      <span
+                        className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded ${
+                          reportModality === 'fiscalizacao'
+                            ? 'bg-amber-800/70 text-white'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {fiscalizacoes.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (reportModality === 'processos') {
+                    setHasActivatedNotificacoesTab(true);
+                    setReportModality('fiscalizacao');
+                  } else {
+                    setReportModality('processos');
+                  }
+                }}
+                className={`inline-flex items-center justify-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  reportModality === 'processos'
+                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-red-50 hover:bg-red-100 text-red-900 border-red-300'
+                }`}
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <span>
+                  {reportModality === 'processos'
+                    ? 'Alternar para Estatísticas de Fiscalizações'
+                    : 'Alternar para Estatísticas de Processos'}
+                </span>
+              </button>
+            </div>
+
+            {reportModality === 'processos' ? (
+              <StatisticalReportDashboard
+                notifications={notifications}
+                selectedYear={selectedYear}
+                availableYears={availableYears}
+                onEditRecord={handleEdit}
+              />
+            ) : (
+              <FiscalizacaoStatisticalDashboard
+                records={fiscalizacoes}
+                isLoading={isFiscalizacoesLoading}
+                onOpenFiscalizacoesTab={() => setActiveView('notificacoes')}
+                onSaveRecord={async (rec, isEditing) => {
+                  if (!user) return;
+                  try {
+                    await saveFiscalizacaoToFirestore(user.uid, rec, isEditing);
+                    addToast(
+                      'success',
+                      isEditing ? 'Fiscalização atualizada!' : 'Fiscalização cadastrada!',
+                      `Registro #${String(rec.codigo).padStart(4, '0')} (${rec.edificacao}) salvo no Firestore.`
+                    );
+                  } catch (err) {
+                    setFatalError(err instanceof Error ? err : new Error(String(err)));
+                  }
+                }}
+              />
+            )}
+          </div>
         ) : (
           <FiscalizacoesWorkspace
             records={fiscalizacoes}
@@ -1311,7 +1429,9 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4 text-slate-500">
             <span>SST - 10º GBM (Angra dos Reis)</span>
-            {activeView !== 'notificacoes' && notifications.length > 0 && (
+            {activeView !== 'notificacoes' &&
+              !(activeView === 'relatorios' && reportModality === 'fiscalizacao') &&
+              notifications.length > 0 && (
               <>
                 <span>·</span>
                 <button

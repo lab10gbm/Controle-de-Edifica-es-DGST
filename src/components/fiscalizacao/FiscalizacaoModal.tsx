@@ -27,6 +27,27 @@ interface FiscalizacaoModalProps {
   nextCodigo: number;
 }
 
+export function mapTipoAtoToFiscalizacaoStatus(
+  tipoAto: string
+): FiscalizacaoStatus | null {
+  const norm = String(tipoAto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+  if (!norm) return null;
+  if (norm.includes('encerrad') || norm.includes('encerrament')) return 'Encerrado';
+  if (norm.includes('cancelad') || norm.includes('cancelament')) return 'Cancelado';
+  if (norm.includes('perigo iminente')) return 'Auto de Interdição por Perigo iminente';
+  if (norm.includes('interdic')) return 'Auto de Interdição por Inércia';
+  if (norm.includes('2') && norm.includes('auto')) return '2º Auto de Infração';
+  if (norm.includes('1') && norm.includes('auto')) return '1º Auto de Infração';
+  if (norm.includes('tac')) return 'TAC em Andamento';
+  if (norm.includes('notificac')) return 'Notificação';
+  return null;
+}
+
 export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
   isOpen,
   onClose,
@@ -59,11 +80,21 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
   const [newAtoNumero, setNewAtoNumero] = useState('');
   const [newAtoOrgao, setNewAtoOrgao] = useState('DGST');
   const [newAtoObs, setNewAtoObs] = useState('');
+  const [atoDraftDirty, setAtoDraftDirty] = useState(false);
+  const [autoSyncHint, setAutoSyncHint] = useState<string | null>(null);
 
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
+    setAtoDraftDirty(false);
+    setAutoSyncHint(null);
+    setNewAtoData(new Date().toLocaleDateString('pt-BR'));
+    setNewAtoTipo('Notificação');
+    setNewAtoNumero('');
+    setNewAtoOrgao('DGST');
+    setNewAtoObs('');
+
     if (editingRecord) {
       setCodigo(editingRecord.codigo);
       setEdificacao(editingRecord.edificacao);
@@ -111,8 +142,18 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
       ...(newAtoObs.trim() ? { observacao: newAtoObs.trim() } : {}),
     };
     setHistoricoAtos((prev) => [...prev, ato]);
+
+    const mappedStatus = mapTipoAtoToFiscalizacaoStatus(ato.tipoAto);
+    if (mappedStatus) {
+      setStatus(mappedStatus);
+      setAutoSyncHint(`Situação atualizada automaticamente para "${mappedStatus}".`);
+    } else {
+      setAutoSyncHint(null);
+    }
+
     setNewAtoNumero('');
     setNewAtoObs('');
+    setAtoDraftDirty(false);
   };
 
   const handleRemoveAto = (id: string) => {
@@ -126,7 +167,27 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
     setIsSaving(true);
     try {
       const nowISO = new Date().toISOString();
-      const rebuiltHistTexto = historicoAtos
+      let finalHistoricoAtos = [...historicoAtos];
+      let finalStatus: FiscalizacaoStatus = status;
+
+      // Caso o usuário tenha selecionado um novo tipo de ato (ex.: Encerramento) ou preenchido número/obs sem clicar em "+ Add"
+      if (atoDraftDirty && (newAtoTipo !== 'Notificação' || newAtoNumero.trim() || newAtoObs.trim())) {
+        const pendingAto: FiscalizacaoAto = {
+          id: `ato-${Date.now()}`,
+          data: newAtoData.trim() || new Date().toLocaleDateString('pt-BR'),
+          tipoAto: newAtoTipo.trim() || 'Ato Fiscal',
+          numeroAto: newAtoNumero.trim(),
+          orgao: newAtoOrgao.trim() || 'DGST',
+          ...(newAtoObs.trim() ? { observacao: newAtoObs.trim() } : {}),
+        };
+        finalHistoricoAtos = [...finalHistoricoAtos, pendingAto];
+        const mappedFromPending = mapTipoAtoToFiscalizacaoStatus(pendingAto.tipoAto);
+        if (mappedFromPending && (!editingRecord || status === editingRecord.status)) {
+          finalStatus = mappedFromPending;
+        }
+      }
+
+      const rebuiltHistTexto = finalHistoricoAtos
         .map((a) =>
           [a.data, a.tipoAto, a.numeroAto, a.orgao, a.observacao]
             .filter(Boolean)
@@ -134,12 +195,12 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
         )
         .join(' ');
 
-      const lastAto = historicoAtos[historicoAtos.length - 1];
+      const lastAto = finalHistoricoAtos[finalHistoricoAtos.length - 1];
       const yearMatch =
         dataExpedicao.match(/\b(19\d{2}|20\d{2})\b/) ||
-        historicoAtos.find((a) => /\b(19\d{2}|20\d{2})\b/.test(a.data))?.data.match(
-          /\b(19\d{2}|20\d{2})\b/
-        );
+        finalHistoricoAtos
+          .find((a) => /\b(19\d{2}|20\d{2})\b/.test(a.data))
+          ?.data.match(/\b(19\d{2}|20\d{2})\b/);
 
       const safeCodigo = Number.isFinite(codigo) && codigo > 0 ? codigo : nextCodigo;
       const payload: FiscalizacaoRecord = {
@@ -153,15 +214,15 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
         enderecoCompleto: enderecoCompleto.trim(),
         municipio: municipio.trim() || 'Não Informado',
         processoVinculado: processoVinculado.trim(),
-        status,
+        status: finalStatus,
         dataExpedicao: dataExpedicao.trim(),
         dataValidade: dataValidade.trim(),
         anoExpedicao: yearMatch ? yearMatch[1] : editingRecord?.anoExpedicao || '',
         rgFiscal: rgFiscal.trim(),
         fiscalResponsavel: fiscalResponsavel.trim(),
-        orgaoPrincipal: lastAto?.orgao || historicoAtos[0]?.orgao || editingRecord?.orgaoPrincipal || 'DGST',
-        ultimoNumeroAto: lastAto?.numeroAto || historicoAtos[0]?.numeroAto || editingRecord?.ultimoNumeroAto || '',
-        historicoAtos,
+        orgaoPrincipal: lastAto?.orgao || finalHistoricoAtos[0]?.orgao || editingRecord?.orgaoPrincipal || 'DGST',
+        ultimoNumeroAto: lastAto?.numeroAto || finalHistoricoAtos[0]?.numeroAto || editingRecord?.ultimoNumeroAto || '',
+        historicoAtos: finalHistoricoAtos,
         historicoTexto:
           rebuiltHistTexto || editingRecord?.historicoTexto || '',
         redacao: redacao.trim(),
@@ -232,7 +293,10 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
               </label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value as FiscalizacaoStatus)}
+                onChange={(e) => {
+                  setStatus(e.target.value as FiscalizacaoStatus);
+                  setAutoSyncHint(null);
+                }}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/30 focus:border-amber-600 bg-white font-medium"
               >
                 {FISCALIZACAO_STATUS_LIST.map((s) => (
@@ -241,6 +305,11 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
                   </option>
                 ))}
               </select>
+              {autoSyncHint && (
+                <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                  {autoSyncHint}
+                </p>
+              )}
             </div>
 
             <div>
@@ -435,7 +504,10 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
               />
               <select
                 value={newAtoTipo}
-                onChange={(e) => setNewAtoTipo(e.target.value)}
+                onChange={(e) => {
+                  setNewAtoTipo(e.target.value);
+                  setAtoDraftDirty(true);
+                }}
                 className="sm:col-span-3 px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
               >
                 <option value="Notificação">Notificação</option>
@@ -449,7 +521,10 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
               <input
                 type="text"
                 value={newAtoNumero}
-                onChange={(e) => setNewAtoNumero(e.target.value)}
+                onChange={(e) => {
+                  setNewAtoNumero(e.target.value);
+                  setAtoDraftDirty(true);
+                }}
                 placeholder="Nº do Documento"
                 className="sm:col-span-2 px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
               />
@@ -463,7 +538,10 @@ export const FiscalizacaoModal: React.FC<FiscalizacaoModalProps> = ({
               <input
                 type="text"
                 value={newAtoObs}
-                onChange={(e) => setNewAtoObs(e.target.value)}
+                onChange={(e) => {
+                  setNewAtoObs(e.target.value);
+                  setAtoDraftDirty(true);
+                }}
                 placeholder="Obs. (opcional)"
                 className="sm:col-span-2 px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
               />

@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import {
-  StatisticalMatrixResult,
+  GenericStatisticalMatrixResult,
   MONTH_ABBR,
   REPORT_CATEGORIES,
 } from './statisticalReport';
@@ -16,8 +16,17 @@ export interface PrintStudioOptions {
   pageBreakBetween: boolean;
 }
 
+export interface StatisticalReportLabels {
+  reportTitle?: string;
+  chartTitle?: string;
+  rowColumnLabel?: string;
+  categories?: readonly string[];
+  emptyMessage?: string;
+  filePrefix?: string;
+}
+
 interface GenerateStatisticalPdfParams {
-  matrix: StatisticalMatrixResult;
+  matrix: GenericStatisticalMatrixResult<unknown, string>;
   officialTitle: string;
   reportYear: number;
   monthsSubtitle: string;
@@ -25,6 +34,7 @@ interface GenerateStatisticalPdfParams {
   monthColors: string[];
   svgElement: SVGSVGElement | null;
   options?: Partial<PrintStudioOptions>;
+  labels?: StatisticalReportLabels;
 }
 
 function serializeStyledSvgToDataUrl(svgEl: SVGSVGElement): string {
@@ -107,7 +117,20 @@ export async function generateStatisticalPdfReport({
   monthColors,
   svgElement,
   options,
+  labels,
 }: GenerateStatisticalPdfParams): Promise<void> {
+  const reportTitle = (
+    labels?.reportTitle || 'ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS'
+  ).toUpperCase();
+  const chartTitle = (
+    labels?.chartTitle || 'GRÁFICO DA ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS'
+  ).toUpperCase();
+  const rowColumnLabel = (labels?.rowColumnLabel || 'PROCESSO').toUpperCase();
+  const categories = labels?.categories || REPORT_CATEGORIES;
+  const emptyMessage =
+    labels?.emptyMessage || 'Sem registros encontrados para o período selecionado.';
+  const filePrefix = labels?.filePrefix || 'quadro-grafico';
+
   const opts: PrintStudioOptions = {
     order: options?.order ?? 'table-first',
     orientation: options?.orientation ?? 'portrait',
@@ -188,7 +211,7 @@ export async function generateStatisticalPdfReport({
 
       doc.setFontSize(9.5);
       doc.setTextColor(15, 23, 42);
-      doc.text('ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS', centerX, innerY + 33, {
+      doc.text(reportTitle, centerX, innerY + 33, {
         align: 'center',
       });
 
@@ -202,7 +225,7 @@ export async function generateStatisticalPdfReport({
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9.5);
       doc.setTextColor(15, 23, 42);
-      doc.text('ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS', centerX, innerY + 7, {
+      doc.text(reportTitle, centerX, innerY + 7, {
         align: 'center',
       });
       doc.setFontSize(8.5);
@@ -231,7 +254,7 @@ export async function generateStatisticalPdfReport({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(15, 23, 42);
-    doc.text('PROCESSO', tableX + colProcW / 2, curY + 5.6, { align: 'center' });
+    doc.text(rowColumnLabel, tableX + colProcW / 2, curY + 5.6, { align: 'center' });
 
     let colX = tableX + colProcW;
     doc.line(colX, curY, colX, curY + headerH);
@@ -304,7 +327,7 @@ export async function generateStatisticalPdfReport({
       curY += 4.5;
 
       const colW = tableW / 2;
-      REPORT_CATEGORIES.forEach((cat, idx) => {
+      categories.forEach((cat, idx) => {
         const row = matrix.rows.find((r) => r.category === cat);
         const count = row?.total || 0;
         const pct = matrix.grandTotal > 0 ? ((count / matrix.grandTotal) * 100).toFixed(1).replace('.', ',') : '0,0';
@@ -335,7 +358,7 @@ export async function generateStatisticalPdfReport({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(15, 23, 42);
-    doc.text('GRÁFICO DA ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS', centerX, startY + 7.5, {
+    doc.text(chartTitle, centerX, startY + 7.5, {
       align: 'center',
     });
 
@@ -384,7 +407,7 @@ export async function generateStatisticalPdfReport({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(100, 116, 139);
-      doc.text('Sem processos registrados para o período selecionado.', centerX, startY + 28 + imgH / 2, {
+      doc.text(emptyMessage, centerX, startY + 28 + imgH / 2, {
         align: 'center',
       });
     }
@@ -445,5 +468,5 @@ export async function generateStatisticalPdfReport({
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9]+/g, '-')
     .toLowerCase();
-  doc.save(`quadro-grafico-${safeSlug}-${reportYear}.pdf`);
+  doc.save(`${filePrefix}-${safeSlug}-${reportYear}.pdf`);
 }

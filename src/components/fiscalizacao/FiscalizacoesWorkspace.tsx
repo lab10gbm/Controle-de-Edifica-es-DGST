@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BellRing,
@@ -60,11 +60,25 @@ const DEFAULT_FILTERS: FiscalizacaoFilterState = {
   municipio: '',
   orgao: '',
   ano: CURRENT_YEAR,
-  ordenacaoCampo: 'codigo',
-  ordenacaoDirecao: 'asc',
+  ordenacaoCampo: 'dataExpedicao',
+  ordenacaoDirecao: 'desc',
 };
 
 const PAGE_SIZE = 50;
+
+function toSortableDateKey(r: FiscalizacaoRecord): string {
+  const d = (r.dataExpedicao || '').trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d) && d !== '00/00/0000') {
+    return d.split('/').reverse().join('-');
+  }
+  const validAto = (r.historicoAtos || []).find(
+    (a) => /^\d{2}\/\d{2}\/\d{4}$/.test(a.data) && a.data !== '00/00/0000'
+  );
+  if (validAto) {
+    return validAto.data.split('/').reverse().join('-');
+  }
+  return '0000-00-00';
+}
 
 export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
   records,
@@ -106,6 +120,69 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
   // Clear All Confirm
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [isClearingAll, setIsClearingAll] = useState(false);
+
+  // Reconciliação idempotente (execução única) para registros que receberam ato "Encerramento" ou "Cancelamento" antes da sincronia automática
+  const reconciledAtoStatusRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (isLoading || records.length === 0 || reconciledAtoStatusRef.current) return;
+    try {
+      if (localStorage.getItem('cbmerj_fisc_ato_status_sync_v1') === '1') {
+        reconciledAtoStatusRef.current = true;
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    reconciledAtoStatusRef.current = true;
+    const toFix: Array<{ rec: FiscalizacaoRecord; nextStatus: FiscalizacaoStatus }> = [];
+
+    for (const rec of records) {
+      const atos = rec.historicoAtos || [];
+      if (atos.length === 0) continue;
+      const lastAto = atos[atos.length - 1];
+      const norm = String(lastAto?.tipoAto || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+      if (
+        (norm === 'encerramento' || norm === 'encerrado') &&
+        rec.status !== 'Encerrado' &&
+        rec.status !== 'Cancelado'
+      ) {
+        toFix.push({ rec, nextStatus: 'Encerrado' });
+      } else if (
+        (norm === 'cancelamento' || norm === 'cancelado') &&
+        rec.status !== 'Cancelado' &&
+        rec.status !== 'Encerrado'
+      ) {
+        toFix.push({ rec, nextStatus: 'Cancelado' });
+      }
+    }
+
+    try {
+      localStorage.setItem('cbmerj_fisc_ato_status_sync_v1', '1');
+    } catch {
+      // ignore
+    }
+
+    if (toFix.length === 0) return;
+
+    (async () => {
+      for (const { rec, nextStatus } of toFix) {
+        await onSaveRecord(
+          {
+            ...rec,
+            status: nextStatus,
+            atualizadoEm: new Date().toISOString(),
+          },
+          true
+        );
+      }
+    })();
+  }, [isLoading, records, onSaveRecord]);
 
   // Registros filtrados pelo ano selecionado (base reativa para os cards KPI e dropdowns)
   const recordsInSelectedYear = useMemo(() => {
@@ -183,6 +260,25 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
     return Math.max(...records.map((r) => r.codigo || 0)) + 1;
   }, [records]);
 
+  // Numeração anual sequencial reiniciada em 1/ANO do mais antigo para o mais atual
+  const annualNumberMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!filters.ano) return map;
+
+    const chronologicalAsc = [...recordsInSelectedYear].sort((a, b) => {
+      const isoA = toSortableDateKey(a);
+      const isoB = toSortableDateKey(b);
+      if (isoA !== isoB) return isoA.localeCompare(isoB);
+      return a.codigo - b.codigo;
+    });
+
+    chronologicalAsc.forEach((rec, index) => {
+      map.set(rec.id, `${index + 1}/${filters.ano}`);
+    });
+
+    return map;
+  }, [recordsInSelectedYear, filters.ano]);
+
   // Filtering + Strict Ordering
   const filteredRecords = useMemo(() => {
     const term = filters.termoBusca.trim().toLowerCase();
@@ -191,10 +287,12 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
     return records
       .filter((r) => {
         if (term) {
+          const annualCode = (annualNumberMap.get(r.id) || '').toLowerCase();
           const matchCodigo =
             String(r.codigo).includes(term) ||
             String(r.codigo).padStart(4, '0').includes(term) ||
-            `#${r.codigo}`.includes(term);
+            `#${r.codigo}`.includes(term) ||
+            (annualCode && annualCode.includes(term));
           const matchEdif = r.edificacao.toLowerCase().includes(term);
           const matchDoc =
             r.documentoCpfCnpj.toLowerCase().includes(term) ||
@@ -267,12 +365,12 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
         if (filters.ordenacaoCampo === 'status') {
           return a.status.localeCompare(b.status, 'pt-BR') * dir;
         }
-        const isoA = a.dataExpedicao.split('/').reverse().join('-');
-        const isoB = b.dataExpedicao.split('/').reverse().join('-');
+        const isoA = toSortableDateKey(a);
+        const isoB = toSortableDateKey(b);
         if (isoA !== isoB) return isoA.localeCompare(isoB) * dir;
         return (a.codigo - b.codigo) * dir;
       });
-  }, [records, filters]);
+  }, [records, filters, annualNumberMap]);
 
   const activeRecords = useMemo(
     () =>
@@ -960,6 +1058,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
                         <FiscalizacaoRow
                           key={rec.id}
                           record={rec}
+                          displayNumero={annualNumberMap.get(rec.id)}
                           onEdit={(r) => {
                             setEditingRecord(r);
                             setIsModalOpen(true);
@@ -1064,6 +1163,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
                         <FiscalizacaoRow
                           key={rec.id}
                           record={rec}
+                          displayNumero={annualNumberMap.get(rec.id)}
                           onEdit={(r) => {
                             setEditingRecord(r);
                             setIsModalOpen(true);
@@ -1134,6 +1234,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
           onClose={() => setIsPrintOpen(false)}
           singleRecord={singlePrintRecord}
           recordsList={filteredRecords}
+          displayNumberMap={annualNumberMap}
         />
       )}
 

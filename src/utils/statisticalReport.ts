@@ -1,4 +1,5 @@
 import { BuildingNotification } from '../types';
+import { FiscalizacaoRecord, FiscalizacaoStatus } from '../types/fiscalizacao';
 
 export type ReportCategory =
   | 'CERTIFICADO DE APROVAÇÃO'
@@ -221,18 +222,28 @@ export function extractMonthYear(
   return null;
 }
 
-export interface StatisticalMatrixResult {
+export interface GenericStatisticalMatrixRow<Cat extends string = string> {
+  category: Cat;
+  byMonth: Record<number, number>;
+  total: number;
+}
+
+export interface GenericStatisticalMatrixResult<
+  Rec = BuildingNotification,
+  Cat extends string = string,
+> {
   months: number[];
-  rows: Array<{
-    category: ReportCategory;
-    byMonth: Record<number, number>;
-    total: number;
-  }>;
+  rows: Array<GenericStatisticalMatrixRow<Cat>>;
   totalsByMonth: Record<number, number>;
   grandTotal: number;
-  matchedRecords: BuildingNotification[];
-  recordsByCell: Record<string, BuildingNotification[]>; // key: `${category}::${month}` or `${category}::TOTAL` or `TOTAL::${month}`
+  matchedRecords: Rec[];
+  recordsByCell: Record<string, Rec[]>; // key: `${category}::${month}` or `${category}::TOTAL` or `TOTAL::${month}`
 }
+
+export type StatisticalMatrixResult = GenericStatisticalMatrixResult<
+  BuildingNotification,
+  ReportCategory
+>;
 
 export function buildStatisticalMatrix(
   notifications: BuildingNotification[],
@@ -344,6 +355,271 @@ export function exportStatisticalMatrixCSV(
   const link = document.createElement('a');
   link.href = url;
   link.setAttribute('download', `estatistica-cbmerj-${slug}-${year}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================================
+// MÓDULO INDEPENDENTE DE ESTATÍSTICA PARA FISCALIZAÇÕES
+// (Notificações, 1º e 2º Autos de Infração, Interdições/TAC, Encerrados/Canc.)
+// ============================================================================
+
+export type FiscalizacaoReportCategory =
+  | 'NOTIFICAÇÃO'
+  | '1º AUTO DE INFRAÇÃO'
+  | '2º AUTO DE INFRAÇÃO'
+  | 'INTERDIÇÃO / TAC'
+  | 'ENCERRADO / CANCELADO';
+
+export const FISCALIZACAO_REPORT_CATEGORIES: readonly FiscalizacaoReportCategory[] = [
+  'NOTIFICAÇÃO',
+  '1º AUTO DE INFRAÇÃO',
+  '2º AUTO DE INFRAÇÃO',
+  'INTERDIÇÃO / TAC',
+  'ENCERRADO / CANCELADO',
+] as const;
+
+export type FiscalizacaoDateBasis = 'expedicao' | 'atos';
+
+export type FiscalizacaoStatisticalMatrixResult = GenericStatisticalMatrixResult<
+  FiscalizacaoRecord,
+  FiscalizacaoReportCategory
+>;
+
+export function parseBrOrIsoMonthYear(
+  rawDate?: string
+): { month: number; year: number } | null {
+  const clean = String(rawDate || '').trim();
+  if (!clean || clean === '-' || clean === '00/00/0000' || clean === '0000-00-00') {
+    return null;
+  }
+
+  const isoMatch = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    if (year > 1900 && month >= 1 && month <= 12) return { month, year };
+  }
+
+  const brMatch = clean.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
+  if (brMatch) {
+    const day = parseInt(brMatch[1], 10);
+    const month = parseInt(brMatch[2], 10);
+    let year = parseInt(brMatch[3], 10);
+    if (year < 100) year += 2000;
+    if (day >= 1 && day <= 31 && year > 1900 && month >= 1 && month <= 12) {
+      return { month, year };
+    }
+  }
+
+  return null;
+}
+
+export function classifyFiscalizacaoStatus(
+  status: FiscalizacaoStatus | string
+): FiscalizacaoReportCategory {
+  if (status === 'Notificação') return 'NOTIFICAÇÃO';
+  if (status === '1º Auto de Infração') return '1º AUTO DE INFRAÇÃO';
+  if (status === '2º Auto de Infração') return '2º AUTO DE INFRAÇÃO';
+  if (
+    status === 'Auto de Interdição por Inércia' ||
+    status === 'Auto de Interdição por Perigo iminente' ||
+    status === 'TAC em Andamento'
+  ) {
+    return 'INTERDIÇÃO / TAC';
+  }
+  return 'ENCERRADO / CANCELADO';
+}
+
+export function classifyFiscalizacaoAto(
+  tipoAto: string,
+  fallbackStatus: FiscalizacaoStatus | string
+): FiscalizacaoReportCategory {
+  const norm = String(tipoAto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+
+  if ((norm.includes('2O') || norm.includes('2º') || norm.includes('SEGUNDO')) && norm.includes('AUTO')) {
+    return '2º AUTO DE INFRAÇÃO';
+  }
+  if (
+    norm.includes('1O') ||
+    norm.includes('1º') ||
+    norm.includes('PRIMEIRO') ||
+    norm.includes('AUTO DE INFRACAO')
+  ) {
+    return '1º AUTO DE INFRAÇÃO';
+  }
+  if (norm.includes('INTERDIC') || norm.includes('TAC')) {
+    return 'INTERDIÇÃO / TAC';
+  }
+  if (norm.includes('ENCERRAD') || norm.includes('CANCEL') || norm.includes('ARQUIV')) {
+    return 'ENCERRADO / CANCELADO';
+  }
+  if (norm.includes('NOTIFIC')) {
+    return 'NOTIFICAÇÃO';
+  }
+  return classifyFiscalizacaoStatus(fallbackStatus);
+}
+
+export function extractFiscalizacaoExpedicaoMonthYear(
+  record: FiscalizacaoRecord
+): { month: number; year: number } | null {
+  const direct = parseBrOrIsoMonthYear(record.dataExpedicao);
+  if (direct) return direct;
+
+  for (const ato of record.historicoAtos || []) {
+    const parsed = parseBrOrIsoMonthYear(ato.data);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+export function buildFiscalizacaoStatisticalMatrix(
+  records: FiscalizacaoRecord[],
+  months: number[],
+  targetYear: number,
+  dateBasis: FiscalizacaoDateBasis,
+  options?: {
+    municipioFilter?: string;
+    orgaoFilter?: string;
+  }
+): FiscalizacaoStatisticalMatrixResult {
+  const municipioFilter = (options?.municipioFilter || '').trim().toLowerCase();
+  const orgaoFilter = (options?.orgaoFilter || '').trim().toLowerCase();
+
+  const matrix: Record<FiscalizacaoReportCategory, Record<number, number>> = {
+    NOTIFICAÇÃO: {},
+    '1º AUTO DE INFRAÇÃO': {},
+    '2º AUTO DE INFRAÇÃO': {},
+    'INTERDIÇÃO / TAC': {},
+    'ENCERRADO / CANCELADO': {},
+  };
+
+  const totalsByMonth: Record<number, number> = {};
+  for (const m of months) {
+    totalsByMonth[m] = 0;
+    for (const cat of FISCALIZACAO_REPORT_CATEGORIES) {
+      matrix[cat][m] = 0;
+    }
+  }
+
+  const matchedRecordIds = new Set<string>();
+  const matchedRecords: FiscalizacaoRecord[] = [];
+  const recordsByCell: Record<string, FiscalizacaoRecord[]> = {};
+  const cellSeen = new Set<string>();
+
+  const pushCellUnique = (key: string, rec: FiscalizacaoRecord) => {
+    const dedupe = `${key}::${rec.id}`;
+    if (cellSeen.has(dedupe)) return;
+    cellSeen.add(dedupe);
+    if (!recordsByCell[key]) recordsByCell[key] = [];
+    recordsByCell[key].push(rec);
+  };
+
+  const registerOccurrence = (
+    category: FiscalizacaoReportCategory,
+    month: number,
+    rec: FiscalizacaoRecord
+  ) => {
+    matrix[category][month] = (matrix[category][month] || 0) + 1;
+    totalsByMonth[month] = (totalsByMonth[month] || 0) + 1;
+
+    if (!matchedRecordIds.has(rec.id)) {
+      matchedRecordIds.add(rec.id);
+      matchedRecords.push(rec);
+    }
+
+    pushCellUnique(`${category}::${month}`, rec);
+    pushCellUnique(`${category}::TOTAL`, rec);
+    pushCellUnique(`TOTAL::${month}`, rec);
+    pushCellUnique('TOTAL::TOTAL', rec);
+  };
+
+  for (const rec of records) {
+    if (municipioFilter && (rec.municipio || 'Não Informado').toLowerCase() !== municipioFilter) {
+      continue;
+    }
+    if (orgaoFilter && (rec.orgaoPrincipal || '').toLowerCase() !== orgaoFilter) {
+      continue;
+    }
+
+    if (dateBasis === 'expedicao') {
+      const my = extractFiscalizacaoExpedicaoMonthYear(rec);
+      if (!my || my.year !== targetYear || !months.includes(my.month)) continue;
+      const category = classifyFiscalizacaoStatus(rec.status);
+      registerOccurrence(category, my.month, rec);
+    } else {
+      const atos = rec.historicoAtos || [];
+      if (atos.length === 0) {
+        const my = extractFiscalizacaoExpedicaoMonthYear(rec);
+        if (my && my.year === targetYear && months.includes(my.month)) {
+          registerOccurrence(classifyFiscalizacaoStatus(rec.status), my.month, rec);
+        }
+        continue;
+      }
+
+      for (const ato of atos) {
+        const my = parseBrOrIsoMonthYear(ato.data);
+        if (!my || my.year !== targetYear || !months.includes(my.month)) continue;
+        const category = classifyFiscalizacaoAto(ato.tipoAto, rec.status);
+        registerOccurrence(category, my.month, rec);
+      }
+    }
+  }
+
+  let grandTotal = 0;
+  const rows = FISCALIZACAO_REPORT_CATEGORIES.map((category) => {
+    const byMonth = matrix[category];
+    const total = months.reduce((acc, m) => acc + (byMonth[m] || 0), 0);
+    grandTotal += total;
+    return {
+      category,
+      byMonth,
+      total,
+    };
+  });
+
+  return {
+    months,
+    rows,
+    totalsByMonth,
+    grandTotal,
+    matchedRecords,
+    recordsByCell,
+  };
+}
+
+export function exportFiscalizacaoStatisticalCSV(
+  matrix: FiscalizacaoStatisticalMatrixResult,
+  periodTitle: string,
+  year: number
+) {
+  const headers = ['MODALIDADE / SITUAÇÃO', ...matrix.months.map((m) => MONTH_ABBR[m]), 'TOTAL'];
+  const csvRows = [
+    headers.join(';'),
+    ...matrix.rows.map((r) =>
+      [`"${r.category}"`, ...matrix.months.map((m) => r.byMonth[m] || 0), r.total].join(';')
+    ),
+    ['"TOTAL"', ...matrix.months.map((m) => matrix.totalsByMonth[m] || 0), matrix.grandTotal].join(';'),
+  ];
+
+  const bom = '\uFEFF';
+  const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const slug = periodTitle
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-');
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `estatistica-fiscalizacoes-${slug}-${year}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

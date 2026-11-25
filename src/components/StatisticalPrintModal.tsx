@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react';
 import {
-  StatisticalMatrixResult,
+  GenericStatisticalMatrixResult,
   MONTH_ABBR,
   REPORT_CATEGORIES,
 } from '../utils/statisticalReport';
 import {
   generateStatisticalPdfReport,
   PrintStudioOptions,
+  StatisticalReportLabels,
 } from '../utils/statisticalReportPdf';
 import {
   ArrowUpDown,
@@ -28,7 +29,7 @@ interface ChartGroup {
 interface StatisticalPrintModalProps {
   isOpen: boolean;
   onClose: () => void;
-  matrix: StatisticalMatrixResult;
+  matrix: GenericStatisticalMatrixResult<unknown, string>;
   officialTitle: string;
   reportYear: number;
   monthsSubtitle: string;
@@ -40,6 +41,7 @@ interface StatisticalPrintModalProps {
   maxTick: number;
   showBarValues: boolean;
   categoryMultilineLabels: Record<string, string[]>;
+  labels?: StatisticalReportLabels;
 }
 
 export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
@@ -57,7 +59,18 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
   maxTick,
   showBarValues,
   categoryMultilineLabels,
+  labels,
 }) => {
+  const reportTitle =
+    labels?.reportTitle || 'ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS';
+  const chartTitle =
+    labels?.chartTitle || 'Gráfico da Estatística de Solicitações de Processos';
+  const rowColumnLabel = labels?.rowColumnLabel || 'PROCESSO';
+  const categories = labels?.categories || REPORT_CATEGORIES;
+  const emptyMessage =
+    labels?.emptyMessage ||
+    `Sem registros encontrados para ${officialTitle} / ${reportYear}.`;
+
   const [options, setOptions] = useState<PrintStudioOptions>({
     order: 'table-first',
     orientation: 'portrait',
@@ -99,6 +112,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
         monthColors,
         svgElement: printSvgRef.current,
         options,
+        labels,
       });
       setNotice(
         `PDF gerado conforme sua organização (${officialTitle} / ${reportYear}).`
@@ -174,7 +188,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
           </p>
           <div className="pt-2">
             <p className="text-xs sm:text-sm font-bold text-slate-900 uppercase">
-              ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS
+              {reportTitle}
             </p>
             <p className="text-xs font-bold text-slate-700 uppercase">
               {officialTitle} / {reportYear}
@@ -184,7 +198,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
       ) : (
         <div className="text-center space-y-0.5 pb-4">
           <p className="text-xs sm:text-sm font-bold text-slate-900 uppercase">
-            ESTATÍSTICA DE SOLICITAÇÕES DE PROCESSOS
+            {reportTitle}
           </p>
           <p className="text-xs font-bold text-slate-700 uppercase">
             {officialTitle} / {reportYear}
@@ -197,7 +211,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
           <thead>
             <tr className="bg-slate-200/80 text-slate-900">
               <th className="border border-slate-800 py-2 px-3 text-center font-bold uppercase tracking-wide min-w-[180px]">
-                PROCESSO
+                {rowColumnLabel}
               </th>
               {matrix.months.map((m) => (
                 <th
@@ -262,7 +276,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
             Distribuição Percentual no Período
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs">
-            {REPORT_CATEGORIES.map((category) => {
+            {categories.map((category) => {
               const row = matrix.rows.find((r) => r.category === category);
               const count = row?.total || 0;
               const pct =
@@ -291,7 +305,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
     >
       <div className="text-center space-y-0.5 mb-3">
         <h3 className="text-sm sm:text-base font-bold text-slate-900 uppercase tracking-tight">
-          Gráfico da Estatística de Solicitações de Processos
+          {chartTitle}
         </h3>
         <p className="text-xs sm:text-sm font-bold text-slate-700 uppercase">
           {officialTitle} / {reportYear}
@@ -325,7 +339,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
 
         {matrix.grandTotal === 0 ? (
           <div className="py-12 text-center text-xs text-slate-500">
-            Sem processos encontrados para {officialTitle} / {reportYear}.
+            {emptyMessage}
           </div>
         ) : (
           <svg
@@ -434,7 +448,7 @@ export const StatisticalPrintModal: React.FC<StatisticalPrintModalProps> = ({
               textAnchor="middle"
               className="fill-slate-600 text-[11px] font-bold uppercase tracking-wider"
             >
-              PROCESSO
+              {rowColumnLabel}
             </text>
           </svg>
         )}

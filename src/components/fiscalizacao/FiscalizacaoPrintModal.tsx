@@ -7,6 +7,7 @@ interface FiscalizacaoPrintModalProps {
   onClose: () => void;
   singleRecord: FiscalizacaoRecord | null;
   recordsList: FiscalizacaoRecord[];
+  displayNumberMap?: Map<string, string>;
 }
 
 function escapeHtml(raw: string): string {
@@ -22,10 +23,14 @@ export const FiscalizacaoPrintModal: React.FC<FiscalizacaoPrintModalProps> = ({
   onClose,
   singleRecord,
   recordsList,
+  displayNumberMap,
 }) => {
+  const getDisplayNum = (r: FiscalizacaoRecord) =>
+    displayNumberMap?.get(r.id) || `#${String(r.codigo).padStart(4, '0')}`;
+
   const [title, setTitle] = useState(
     singleRecord
-      ? `Ficha de Fiscalização #${String(singleRecord.codigo).padStart(4, '0')}`
+      ? `Ficha de Fiscalização ${getDisplayNum(singleRecord)}`
       : 'Relatório de Notificações e Autos de Fiscalização · 10º GBM'
   );
   const [includeRedacao, setIncludeRedacao] = useState(true);
@@ -41,7 +46,7 @@ export const FiscalizacaoPrintModal: React.FC<FiscalizacaoPrintModalProps> = ({
       .map(
         (r) => `
       <tr>
-        <td style="font-family:monospace;font-weight:700;text-align:center;">#${String(r.codigo).padStart(4, '0')}</td>
+        <td style="font-family:monospace;font-weight:700;text-align:center;">${escapeHtml(getDisplayNum(r))}</td>
         <td>
           <strong>${escapeHtml(r.edificacao)}</strong>
           ${r.documentoCpfCnpj ? `<div style="font-size:10px;color:#475569;font-family:monospace;">${escapeHtml(r.documentoCpfCnpj)}</div>` : ''}
@@ -246,7 +251,7 @@ export const FiscalizacaoPrintModal: React.FC<FiscalizacaoPrintModalProps> = ({
                   {itemsToRender.map((r) => (
                     <tr key={r.id} className="align-top">
                       <td className="border border-slate-300 px-2 py-1.5 font-mono font-bold text-center whitespace-nowrap">
-                        #{String(r.codigo).padStart(4, '0')}
+                        {getDisplayNum(r)}
                       </td>
                       <td className="border border-slate-300 px-2 py-1.5">
                         <div className="font-semibold">{r.edificacao}</div>
