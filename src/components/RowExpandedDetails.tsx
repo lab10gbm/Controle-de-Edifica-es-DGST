@@ -18,7 +18,9 @@ import {
   User, 
   Clock, 
   AlertCircle, 
-  Plus, 
+  Plus,
+  PlusCircle,
+  MinusCircle,
   History, 
   Printer, 
   Edit3, 
@@ -38,7 +40,11 @@ import {
   Send,
   Link2,
   ArrowRight,
-  CornerDownRight
+  CornerDownRight,
+  Trash2,
+  AlertTriangle,
+  X,
+  Loader2
 } from 'lucide-react';
 
 interface RowExpandedDetailsProps {
@@ -63,6 +69,9 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const [activeTab, setActiveTab] = useState<'requerente' | 'tramite' | 'documentos' | 'historico'>('requerente');
   const [newNote, setNewNote] = useState('');
   const [authorName, setAuthorName] = useState('Fiscal SST 10º GBM');
+  const [isQuickNoteExpanded, setIsQuickNoteExpanded] = useState(false);
+  const [deletingLogTarget, setDeletingLogTarget] = useState<{ log: AuditLog; index: number } | null>(null);
+  const [isDeletingLog, setIsDeletingLog] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // States para cadastro de novo bilhete (presente e futuro)
@@ -71,6 +80,9 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const [novoBilheteData, setNovoBilheteData] = useState(() => new Date().toLocaleDateString('pt-BR'));
   const [novoBilheteDias, setNovoBilheteDias] = useState<string>('0');
   const [novoBilheteStatus, setNovoBilheteStatus] = useState<string>('EM ANÁLISE');
+  const [novoBilheteAutor, setNovoBilheteAutor] = useState<string>(
+    () => notification.fiscalResponsavel?.trim() || 'Fiscal SST 10º GBM'
+  );
   const [novoBilheteDespacho, setNovoBilheteDespacho] = useState<string>('');
 
   const sst = notification.detalhesSST || {};
@@ -152,6 +164,25 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     setNewNote('');
   };
 
+  const handleConfirmDeleteLog = async () => {
+    if (!deletingLogTarget || !onUpdateNotification || isDeletingLog) return;
+    setIsDeletingLog(true);
+    try {
+      const currentLogs = notification.historico || [];
+      const nextHistorico = currentLogs.filter(
+        (item, idx) => !(idx === deletingLogTarget.index && item.id === deletingLogTarget.log.id)
+      );
+      await onUpdateNotification({
+        ...notification,
+        historico: nextHistorico,
+        atualizadoEm: new Date().toISOString(),
+      });
+      setDeletingLogTarget(null);
+    } finally {
+      setIsDeletingLog(false);
+    }
+  };
+
   const handleSaveNovoBilhete = (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoBilheteData.trim()) return;
@@ -159,6 +190,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     const dataFormatada = formatDateBR(novoBilheteData.trim());
     const proximoNumero = listaBilhetes.length + 1;
     const detalheRotulo = novoDetalheTipo === 'RETORNO' ? `Retorno ${proximoNumero}B` : `Bilhete ${proximoNumero}`;
+    const autorRegistro = novoBilheteAutor.trim() || 'Fiscal SST 10º GBM';
 
     const novoItem: BilheteItem = {
       id: `b-manual-${Date.now()}`,
@@ -169,8 +201,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
       data: dataFormatada,
       dias: novoBilheteDias.trim() || '0',
       statusOuParecer: novoBilheteStatus.trim() || 'Registrado',
-      despacho: novoBilheteDespacho.trim() || `Bilhete registrado por ${authorName}.`,
-      autor: authorName.trim() || 'Fiscal SST 10º GBM',
+      despacho: novoBilheteDespacho.trim() || `Bilhete registrado por ${autorRegistro}.`,
+      autor: autorRegistro,
     };
 
     const novaLista = [...listaBilhetes, novoItem];
@@ -188,7 +220,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     const newLog: AuditLog = {
       id: `log-b-${Date.now()}`,
       data: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
-      autor: authorName.trim() || 'Fiscal SST 10º GBM',
+      autor: autorRegistro,
       acao: novoDetalheTipo === 'RETORNO' ? 'Atualização de Retorno' : 'Registro de Bilhete',
       detalhes: `${novoDetalheTipo === 'RETORNO' ? 'Retorno' : 'Bilhete'} registrado em ${dataFormatada} (${novoBilheteDias} dias decorridos). Situação: ${novoBilheteStatus}. ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
     };
@@ -204,7 +236,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
       onAddQuickNote(
         notification.id,
         `${novoDetalheTipo === 'RETORNO' ? 'Retorno' : 'Bilhete'} registrado (${dataFormatada}, ${novoBilheteDias} dias decorridos): ${novoBilheteStatus}. ${novoBilheteDespacho}`,
-        authorName
+        autorRegistro
       );
     }
 
@@ -1084,7 +1116,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                     <span className="text-[10px] text-blue-700 font-medium">Permite múltiplos bilhetes intermediários</span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
                     <div>
                       <label className="text-[11px] font-semibold text-slate-700 block mb-1">Tipo de Detalhe</label>
                       <select
@@ -1129,6 +1161,27 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                         placeholder="Ex: GERADO DI, FINALIZADO"
                         className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
                       />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Autor do Registro</label>
+                      <input
+                        type="text"
+                        list={`bilhete-autores-${notification.id}`}
+                        value={novoBilheteAutor}
+                        onChange={(e) => setNovoBilheteAutor(e.target.value)}
+                        placeholder="Ex: Fiscal SST 10º GBM"
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                        required
+                      />
+                      <datalist id={`bilhete-autores-${notification.id}`}>
+                        {notification.fiscalResponsavel?.trim() && (
+                          <option value={notification.fiscalResponsavel.trim()} />
+                        )}
+                        <option value="Fiscal SST 10º GBM" />
+                        <option value="Protocolo SST 10º GBM" />
+                        <option value="Diretor de Divisão" />
+                      </datalist>
                     </div>
                   </div>
 
@@ -1216,7 +1269,14 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                           </span>
                         </td>
                         <td className="py-2 px-3 text-slate-600 text-[11px]">
-                          {bilhete.despacho || (bIdx === 0 ? `Bilhete inicial lançado com ${bilhete.dias || 0} dias.` : `Despacho com ${bilhete.dias || 0} dias.`)}
+                          <div>
+                            {bilhete.despacho || (bIdx === 0 ? `Bilhete inicial lançado com ${bilhete.dias || 0} dias.` : `Despacho com ${bilhete.dias || 0} dias.`)}
+                          </div>
+                          {bilhete.autor && (
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Autor: <span className="font-semibold text-slate-600">{bilhete.autor}</span>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1232,37 +1292,50 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2 bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+            <div className="flex flex-col lg:flex-row items-start gap-4">
+              <div className="flex-1 w-full min-w-0 bg-white p-4 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                     <History className="w-4 h-4 text-blue-600" />
                     <span>Linha do Tempo & Histórico de Tramitação</span>
                   </h4>
                   <span className="text-[11px] font-mono text-slate-500">
-                    {notification.historico.length} evento(s)
+                    {(notification.historico || []).length} evento(s)
                   </span>
                 </div>
 
-                {notification.historico.length > 0 ? (
+                {(notification.historico || []).length > 0 ? (
                   <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                    {notification.historico.map((log) => (
-                      <div key={log.id} className="relative group">
+                    {(notification.historico || []).map((log, idx) => (
+                      <div key={`${log.id}-${idx}`} className="relative group">
                         <div className={`absolute -left-6 top-1 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
                           log.acao.includes('Último') ? 'bg-indigo-600' : log.acao.includes('1º') || log.acao.includes('Bilhete') ? 'bg-blue-600' : 'bg-slate-400'
                         }`} />
-                        <div className="text-xs">
-                          <div className="flex items-center gap-2 font-medium text-slate-800">
-                            <span className="font-semibold text-slate-900">{log.acao}</span>
-                            <span className="text-slate-400">·</span>
-                            <span className="text-slate-500 font-mono text-[11px]">{log.data}</span>
+                        <div className="flex items-start justify-between gap-2 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2 font-medium text-slate-800">
+                              <span className="font-semibold text-slate-900">{log.acao}</span>
+                              <span className="text-slate-400">·</span>
+                              <span className="text-slate-500 font-mono text-[11px]">{log.data}</span>
+                            </div>
+                            <div className="text-slate-600 text-xs mt-0.5">
+                              {log.detalhes}
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-0.5">
+                              Registrado por: <strong className="text-slate-600">{log.autor}</strong>
+                            </div>
                           </div>
-                          <div className="text-slate-600 text-xs mt-0.5">
-                            {log.detalhes}
-                          </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5">
-                            Registrado por: <strong className="text-slate-600">{log.autor}</strong>
-                          </div>
+                          {onUpdateNotification && (
+                            <button
+                              type="button"
+                              onClick={() => setDeletingLogTarget({ log, index: idx })}
+                              title="Excluir registro do histórico"
+                              aria-label={`Excluir registro ${log.acao} de ${log.data}`}
+                              className="p-1 rounded text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1272,53 +1345,158 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 )}
               </div>
 
-              <div className="bg-white p-4 rounded-xl border border-slate-200">
-                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Send className="w-4 h-4 text-emerald-600" />
-                  <span>Anotação Rápida / Despacho</span>
-                </h4>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  Insere uma anotação imediata no histórico do processo.
-                </p>
-                <form onSubmit={handleAddNoteSubmit} className="space-y-2.5">
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
-                      Autor do Despacho
-                    </label>
-                    <input
-                      type="text"
-                      value={authorName}
-                      onChange={(e) => setAuthorName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
-                      Conteúdo do Parecer / Anotação
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={newNote}
-                      onChange={(e) => setNewNote(e.target.value)}
-                      placeholder="Ex: Minuta de despacho enviada ao Diretor de Divisão para assinatura..."
-                      className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800"
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded transition-colors cursor-pointer shadow-2xs flex items-center justify-center gap-1.5"
+              <div
+                className={`bg-white border border-slate-200 self-start shrink-0 transition-all ${
+                  isQuickNoteExpanded
+                    ? 'w-full lg:w-80 xl:w-96 p-4 rounded-xl'
+                    : 'w-auto px-2.5 py-1.5 rounded-lg shadow-2xs'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsQuickNoteExpanded((prev) => !prev)}
+                  aria-expanded={isQuickNoteExpanded}
+                  title={isQuickNoteExpanded ? 'Minimizar anotação rápida' : 'Expandir anotação rápida / despacho'}
+                  className={`w-full flex items-center justify-between gap-2 text-left cursor-pointer group ${
+                    isQuickNoteExpanded ? 'mb-2 pb-2 border-b border-slate-100' : ''
+                  }`}
+                >
+                  <h4
+                    className={`font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 ${
+                      isQuickNoteExpanded ? 'text-xs' : 'text-[11px] whitespace-nowrap'
+                    }`}
                   >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Gravar no Histórico</span>
-                  </button>
-                </form>
+                    <Send
+                      className={`text-emerald-600 shrink-0 ${
+                        isQuickNoteExpanded ? 'w-4 h-4' : 'w-3.5 h-3.5'
+                      }`}
+                    />
+                    <span>Anotação Rápida / Despacho</span>
+                  </h4>
+                  {isQuickNoteExpanded ? (
+                    <MinusCircle className="w-4 h-4 text-slate-400 group-hover:text-slate-600 shrink-0 transition-colors" />
+                  ) : (
+                    <PlusCircle className="w-3.5 h-3.5 text-emerald-600 group-hover:text-emerald-700 shrink-0 transition-colors" />
+                  )}
+                </button>
+                {isQuickNoteExpanded && (
+                  <>
+                    <p className="text-[11px] text-slate-500 mb-3">
+                      Insere uma anotação imediata no histórico do processo.
+                    </p>
+                    <form onSubmit={handleAddNoteSubmit} className="space-y-2.5">
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                          Autor do Despacho
+                        </label>
+                        <input
+                          type="text"
+                          value={authorName}
+                          onChange={(e) => setAuthorName(e.target.value)}
+                          className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                          Conteúdo do Parecer / Anotação
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={newNote}
+                          onChange={(e) => setNewNote(e.target.value)}
+                          placeholder="Ex: Minuta de despacho enviada ao Diretor de Divisão para assinatura..."
+                          className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800"
+                          required
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded transition-colors cursor-pointer shadow-2xs flex items-center justify-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Gravar no Histórico</span>
+                      </button>
+                    </form>
+                  </>
+                )}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {deletingLogTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3.5 bg-rose-700 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-100 shrink-0" />
+                <h3 className="text-sm font-bold">Excluir Registro do Histórico</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeletingLogTarget(null)}
+                disabled={isDeletingLog}
+                className="p-1 rounded-lg text-rose-100 hover:text-white hover:bg-rose-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-xs sm:text-sm text-slate-700">
+              <p>
+                Tem certeza de que deseja <strong>excluir permanentemente</strong> este registro da linha do tempo?
+              </p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1 text-xs">
+                <p>
+                  <span className="text-slate-500">Ação:</span>{' '}
+                  <strong className="text-slate-900">{deletingLogTarget.log.acao}</strong>
+                </p>
+                <p>
+                  <span className="text-slate-500">Data:</span>{' '}
+                  <span className="font-mono text-slate-800">{deletingLogTarget.log.data}</span>
+                </p>
+                <p>
+                  <span className="text-slate-500">Autor:</span>{' '}
+                  <span className="font-semibold text-slate-800">{deletingLogTarget.log.autor}</span>
+                </p>
+                {deletingLogTarget.log.detalhes && (
+                  <p className="text-slate-600 pt-1 border-t border-slate-200/70">
+                    {deletingLogTarget.log.detalhes}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeletingLogTarget(null)}
+                disabled={isDeletingLog}
+                className="px-4 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmDeleteLog()}
+                disabled={isDeletingLog}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 disabled:opacity-60 rounded-lg cursor-pointer"
+              >
+                {isDeletingLog ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>{isDeletingLog ? 'Excluindo...' : 'Sim, Excluir Registro'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

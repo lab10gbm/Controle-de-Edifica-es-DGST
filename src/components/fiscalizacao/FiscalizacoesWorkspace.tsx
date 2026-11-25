@@ -41,6 +41,8 @@ import { FiscalizacaoPrintModal } from './FiscalizacaoPrintModal';
 interface FiscalizacoesWorkspaceProps {
   records: FiscalizacaoRecord[];
   isLoading: boolean;
+  selectedYear?: string;
+  onSelectYear?: (year: string) => void;
   onSaveRecord: (record: FiscalizacaoRecord, isEditing: boolean) => Promise<void>;
   onDeleteRecord: (recordId: string) => Promise<void>;
   onBatchImport: (
@@ -83,6 +85,8 @@ function toSortableDateKey(r: FiscalizacaoRecord): string {
 export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
   records,
   isLoading,
+  selectedYear,
+  onSelectYear,
   onSaveRecord,
   onDeleteRecord,
   onBatchImport,
@@ -91,11 +95,19 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
 }) => {
   const [filters, setFilters] = useState<FiscalizacaoFilterState>(DEFAULT_FILTERS);
 
+  const activeAno =
+    selectedYear !== undefined ? (selectedYear === 'TODOS' ? '' : selectedYear) : filters.ano;
+
   // Dashboard collapse & pagination state
   const [isActiveExpanded, setIsActiveExpanded] = useState(true);
   const [isClosedExpanded, setIsClosedExpanded] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [closedPage, setClosedPage] = useState(1);
+
+  useEffect(() => {
+    setActivePage(1);
+    setClosedPage(1);
+  }, [activeAno]);
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -186,9 +198,9 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
 
   // Registros filtrados pelo ano selecionado (base reativa para os cards KPI e dropdowns)
   const recordsInSelectedYear = useMemo(() => {
-    if (!filters.ano) return records;
-    return records.filter((r) => r.anoExpedicao === filters.ano);
-  }, [records, filters.ano]);
+    if (!activeAno) return records;
+    return records.filter((r) => r.anoExpedicao === activeAno);
+  }, [records, activeAno]);
 
   // KPI Metrics reativos ao filtro de ano aplicado
   const stats = useMemo(() => {
@@ -242,19 +254,6 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
     return Array.from(set).sort();
   }, [recordsInSelectedYear]);
 
-  const availableYears = useMemo(() => {
-    const set = new Set<string>();
-    if (records.length > 0) {
-      set.add(CURRENT_YEAR);
-    }
-    for (const r of records) {
-      if (r.anoExpedicao && /^\d{4}$/.test(r.anoExpedicao)) {
-        set.add(r.anoExpedicao);
-      }
-    }
-    return Array.from(set).sort((a, b) => b.localeCompare(a));
-  }, [records]);
-
   const nextCodigo = useMemo(() => {
     if (records.length === 0) return 1;
     return Math.max(...records.map((r) => r.codigo || 0)) + 1;
@@ -263,7 +262,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
   // Numeração anual sequencial reiniciada em 1/ANO do mais antigo para o mais atual
   const annualNumberMap = useMemo(() => {
     const map = new Map<string, string>();
-    if (!filters.ano) return map;
+    if (!activeAno) return map;
 
     const chronologicalAsc = [...recordsInSelectedYear].sort((a, b) => {
       const isoA = toSortableDateKey(a);
@@ -273,11 +272,11 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
     });
 
     chronologicalAsc.forEach((rec, index) => {
-      map.set(rec.id, `${index + 1}/${filters.ano}`);
+      map.set(rec.id, `${index + 1}/${activeAno}`);
     });
 
     return map;
-  }, [recordsInSelectedYear, filters.ano]);
+  }, [recordsInSelectedYear, activeAno]);
 
   // Filtering + Strict Ordering
   const filteredRecords = useMemo(() => {
@@ -348,7 +347,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
           return false;
         }
 
-        if (filters.ano && r.anoExpedicao !== filters.ano) {
+        if (activeAno && r.anoExpedicao !== activeAno) {
           return false;
         }
 
@@ -370,7 +369,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
         if (isoA !== isoB) return isoA.localeCompare(isoB) * dir;
         return (a.codigo - b.codigo) * dir;
       });
-  }, [records, filters, annualNumberMap]);
+  }, [records, filters, activeAno, annualNumberMap]);
 
   const activeRecords = useMemo(
     () =>
@@ -422,6 +421,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
 
   const handleResetFilters = () => {
     setFilters(DEFAULT_FILTERS);
+    onSelectYear?.(CURRENT_YEAR);
     setActivePage(1);
     setClosedPage(1);
   };
@@ -628,7 +628,7 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
             }`}
           >
             <div className="text-[11px] font-medium opacity-80">
-              {filters.ano ? `Total (${filters.ano})` : 'Total (Todos)'}
+              {activeAno ? `Total (${activeAno})` : 'Total (Todos)'}
             </div>
             <div className="text-xl font-bold mt-0.5">{stats.total}</div>
           </button>
@@ -972,38 +972,6 @@ export const FiscalizacoesWorkspace: React.FC<FiscalizacoesWorkspaceProps> = ({
             </div>
           </div>
         </div>
-
-        {/* Chips opcionais de Ano quando houver anos cadastrados */}
-        {availableYears.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-[11px]">
-            <span className="font-semibold text-slate-500 mr-1">Ano do Ato:</span>
-            <button
-              type="button"
-              onClick={() => updateFilter('ano', '')}
-              className={`px-2.5 py-0.5 rounded-md font-semibold border cursor-pointer ${
-                filters.ano === ''
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              Todos
-            </button>
-            {availableYears.map((yr) => (
-              <button
-                key={yr}
-                type="button"
-                onClick={() => updateFilter('ano', filters.ano === yr ? '' : yr)}
-                className={`px-2.5 py-0.5 rounded-md font-semibold font-mono border cursor-pointer ${
-                  filters.ano === yr
-                    ? 'bg-red-700 text-white border-red-700'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                {yr}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Painel 1: Fiscalizações Ativas / Pendentes de Cumprimento */}

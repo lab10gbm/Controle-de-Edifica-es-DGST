@@ -44,24 +44,14 @@ const isLocalizacaoContinuacao = (loc?: string) => {
 const getUrgencyClasses = (notification: BuildingNotification) => {
   const prazo = calcularPrazoProcesso(notification);
 
-  // Processos com DATA DO PRONTO já tiveram sua contagem encerrada
+  // Processos com DATA DO PRONTO já tiveram sua contagem encerrada e devem permanecer no verde
   if (prazo.hasDataPronto) {
-    if (prazo.concluidoNoPrazo) {
-      return {
-        row: 'bg-emerald-50/70 border-emerald-200',
-        badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-        text: 'text-emerald-800',
-        date: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-        label: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-      };
-    }
-    // Concluído após o limite mas já com contagem encerrada (não é pendência urgente)
     return {
-      row: 'bg-slate-50 border-slate-200 hover:bg-slate-100/60',
-      badge: 'bg-amber-100 text-amber-900 border-amber-300',
-      text: 'text-slate-800',
-      date: 'bg-slate-50 text-slate-800 border-slate-200',
-      label: 'bg-amber-100 text-amber-900 border-amber-200',
+      row: 'bg-emerald-50/70 border-emerald-200',
+      badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      text: 'text-emerald-800',
+      date: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+      label: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     };
   }
 
@@ -466,11 +456,7 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
             <div className="flex items-center gap-1.5">
               <span
                 className={`font-mono font-bold tracking-tight px-1.5 py-0.5 rounded border ${
-                  prazoInfo.hasDataPronto
-                    ? prazoInfo.concluidoNoPrazo
-                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                      : 'text-amber-800 bg-amber-50 border-amber-200'
-                    : prazoInfo.isConcluido
+                  prazoInfo.hasDataPronto || prazoInfo.isConcluido
                     ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
                     : prazoInfo.isVencido || (prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 0)
                     ? 'text-red-700 bg-red-50 border-red-200'
@@ -494,7 +480,7 @@ export const NotificationRow: React.FC<NotificationRowProps> = ({
                     Pronto em {prazoInfo.dataProntoBR} (no prazo)
                   </span>
                 ) : (
-                  <span className="text-amber-800 font-medium" title={`Pronto em ${prazoInfo.dataProntoBR} (${prazoInfo.diasNaSST}d na SST, ${prazoInfo.diasEmAtraso}d após limite)`}>
+                  <span className="text-emerald-700 font-medium" title={`Pronto em ${prazoInfo.dataProntoBR} (${prazoInfo.diasNaSST}d na SST, ${prazoInfo.diasEmAtraso}d após limite)`}>
                     Pronto em {prazoInfo.dataProntoBR} ({prazoInfo.diasEmAtraso}d atraso)
                   </span>
                 )

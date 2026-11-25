@@ -92,6 +92,7 @@ export default function App() {
   // Year Partitioning State (preserva 2026, prepara 2027+, economiza leituras diárias no Spark)
   const currentYear = String(new Date().getFullYear());
   const [selectedYear, setSelectedYear] = useState<string>(currentYear);
+  const [fiscalizacaoYear, setFiscalizacaoYear] = useState<string>(currentYear);
   const [remoteYears, setRemoteYears] = useState<string[]>([]);
 
   // Cloud Notifications State
@@ -128,6 +129,16 @@ export default function App() {
       .filter((y) => /^\d{4}$/.test(y))
       .sort();
   }, [remoteYears, currentYear]);
+
+  const availableFiscalizacaoYears = useMemo(() => {
+    const set = new Set<string>([currentYear]);
+    for (const r of fiscalizacoes) {
+      if (r.anoExpedicao && /^\d{4}$/.test(r.anoExpedicao)) {
+        set.add(r.anoExpedicao);
+      }
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [fiscalizacoes, currentYear]);
 
   // Monitor Firebase Authentication
   useEffect(() => {
@@ -440,16 +451,12 @@ export default function App() {
   const [activeView, setActiveView] = useState<'listagem' | 'relatorios' | 'notificacoes'>('listagem');
   const [reportModality, setReportModality] = useState<'processos' | 'fiscalizacao'>('processos');
 
-  // Lazy-live subscription para Fiscalizações / Notificações (economiza cota Spark quando não acessado)
+  // Assinatura global em tempo real de Fiscalizações / Notificações (com cache persistente local no Firestore)
   useEffect(() => {
-    if (
-      (activeView === 'notificacoes' ||
-        (activeView === 'relatorios' && reportModality === 'fiscalizacao')) &&
-      !hasActivatedNotificacoesTab
-    ) {
+    if (authReady && user && !hasActivatedNotificacoesTab) {
       setHasActivatedNotificacoesTab(true);
     }
-  }, [activeView, reportModality, hasActivatedNotificacoesTab]);
+  }, [authReady, user, hasActivatedNotificacoesTab]);
 
   useEffect(() => {
     if (!authReady || !user || !hasActivatedNotificacoesTab) return;
@@ -1088,14 +1095,25 @@ export default function App() {
       <div className="print:hidden">
         <Header
           notifications={notifications}
+          fiscalizacoes={fiscalizacoes}
           userEmail={user.email}
           onSignOut={handleSignOut}
-          selectedYear={selectedYear}
-          availableYears={availableYears}
+          selectedYear={activeView === 'notificacoes' ? fiscalizacaoYear : selectedYear}
+          availableYears={
+            activeView === 'notificacoes' ? availableFiscalizacaoYears : availableYears
+          }
           onSelectYear={
-            activeView !== 'notificacoes' &&
-            !(activeView === 'relatorios' && reportModality === 'fiscalizacao')
+            activeView === 'notificacoes'
+              ? setFiscalizacaoYear
+              : !(activeView === 'relatorios' && reportModality === 'fiscalizacao')
               ? setSelectedYear
+              : undefined
+          }
+          yearScopeHint={
+            activeView === 'notificacoes'
+              ? fiscalizacaoYear === 'TODOS'
+                ? 'Exibindo fiscalizações de todos os exercícios cadastrados.'
+                : `Filtrando fiscalizações pelo exercício ${fiscalizacaoYear} (numeração sequencial 1/${fiscalizacaoYear} do mais antigo ao mais atual).`
               : undefined
           }
           isSyncing={isSyncing || isFiscalizacoesLoading}
@@ -1367,6 +1385,8 @@ export default function App() {
           <FiscalizacoesWorkspace
             records={fiscalizacoes}
             isLoading={isFiscalizacoesLoading}
+            selectedYear={fiscalizacaoYear}
+            onSelectYear={setFiscalizacaoYear}
             onSaveRecord={async (rec, isEditing) => {
               if (!user) return;
               try {
@@ -1429,22 +1449,6 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4 text-slate-500">
             <span>SST - 10º GBM (Angra dos Reis)</span>
-            {activeView !== 'notificacoes' &&
-              !(activeView === 'relatorios' && reportModality === 'fiscalizacao') &&
-              notifications.length > 0 && (
-              <>
-                <span>·</span>
-                <button
-                  type="button"
-                  onClick={handleClearAllData}
-                  className="text-rose-600 hover:text-rose-800 font-semibold underline inline-flex items-center gap-1 cursor-pointer"
-                  title="Excluir todos os registros cadastrados da plataforma"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Excluir Todos os Registros</span>
-                </button>
-              </>
-            )}
           </div>
         </div>
       </footer>
