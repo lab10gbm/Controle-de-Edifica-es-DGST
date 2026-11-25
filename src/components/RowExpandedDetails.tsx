@@ -11,7 +11,9 @@ import {
   formatCpfCnpj,
   isExpired, 
   getDaysRemaining,
-  calcularPrazoProcesso 
+  calcularPrazoProcesso,
+  deriveListaBilhetes,
+  buildDetalhesSSTWithBilhetes
 } from '../utils/helpers';
 import { cleanProcessLinkValue, ProcessLinkInfo } from '../utils/processLinks';
 import { 
@@ -72,6 +74,8 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const [isQuickNoteExpanded, setIsQuickNoteExpanded] = useState(false);
   const [deletingLogTarget, setDeletingLogTarget] = useState<{ log: AuditLog; index: number } | null>(null);
   const [isDeletingLog, setIsDeletingLog] = useState(false);
+  const [deletingBilheteTarget, setDeletingBilheteTarget] = useState<{ bilhete: BilheteItem; index: number } | null>(null);
+  const [isDeletingBilhete, setIsDeletingBilhete] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // States para cadastro de novo bilhete (presente e futuro)
@@ -95,61 +99,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const diasUltimoBilheteVal = sst.diasUltimoBilhete !== undefined && sst.diasUltimoBilhete !== '' ? sst.diasUltimoBilhete : 0;
   const outrosBilhetesVal = sst.outrosBilhetes || '';
 
-  // Lista estruturada de bilhetes: prioriza sst.listaBilhetes ou deriva do 1º e último bilhete
-  const rawLista: BilheteItem[] = (sst.listaBilhetes && sst.listaBilhetes.length > 0)
-    ? sst.listaBilhetes
-    : [
-        ...(dataBilheteFmt !== '-' ? [{
-          id: `b-1-${notification.id}`,
-          ordem: 1,
-          tipo: 'primeiro' as const,
-          tipoDetalhe: 'BILHETE' as const,
-          rotulo: '1º Bilhete',
-          data: dataBilheteFmt,
-          dias: diasBilheteVal,
-          statusOuParecer: 'BILHETE 1',
-          despacho: `Primeiro bilhete lançado com ${diasBilheteVal} dia(s) decorridos.`,
-          autor: 'Fiscal SST 10º GBM'
-        }] : []),
-        ...(ultimoBilheteFmt !== '-' ? [{
-          id: `b-ultimo-${notification.id}`,
-          ordem: 2,
-          tipo: 'ultimo' as const,
-          tipoDetalhe: 'RETORNO' as const,
-          rotulo: 'Último Bilhete',
-          data: ultimoBilheteFmt,
-          dias: diasUltimoBilheteVal,
-          statusOuParecer: outrosBilhetesVal || 'Último Bilhete',
-          despacho: outrosBilhetesVal ? `Parecer: ${outrosBilhetesVal}` : `Último bilhete registrado com ${diasUltimoBilheteVal} dia(s) decorridos.`,
-          autor: 'Fiscal SST 10º GBM'
-        }] : [])
-      ];
-
-  // Garante que o 1º Bilhete (ordem 1 / tipo primeiro) tenha sempre a situação própria (BILHETE 1)
-  // e não copie erroneamente a situação da coluna OUTROS BILHETES (ex: BILHETE 3, RETORNO, GERADO DI)
-  const listaBilhetes: BilheteItem[] = rawLista.map((b, idx) => {
-    if (idx === 0 || b.tipo === 'primeiro' || b.ordem === 1) {
-      const isCopiadoErrado = b.statusOuParecer && b.statusOuParecer === outrosBilhetesVal && outrosBilhetesVal.toUpperCase() !== 'BILHETE 1';
-      const statusPrimeiro = (!b.statusOuParecer || isCopiadoErrado) ? 'BILHETE 1' : b.statusOuParecer;
-      return {
-        ...b,
-        rotulo: b.rotulo || '1º Bilhete',
-        statusOuParecer: statusPrimeiro,
-        despacho: (b.despacho && !b.despacho.includes(outrosBilhetesVal))
-          ? b.despacho
-          : `Primeiro bilhete lançado com ${b.dias || 0} dia(s) decorridos.`
-      };
-    }
-    if ((idx === rawLista.length - 1 || b.tipo === 'ultimo') && (!b.statusOuParecer || b.statusOuParecer === 'Concluído')) {
-      return {
-        ...b,
-        rotulo: b.rotulo || 'Último Bilhete',
-        statusOuParecer: outrosBilhetesVal || b.statusOuParecer || 'Último Bilhete',
-        despacho: outrosBilhetesVal ? `Parecer: ${outrosBilhetesVal}` : b.despacho
-      };
-    }
-    return b;
-  });
+  const listaBilhetes: BilheteItem[] = deriveListaBilhetes(notification.id, sst);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -180,6 +130,33 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
       setDeletingLogTarget(null);
     } finally {
       setIsDeletingLog(false);
+    }
+  };
+
+  const handleConfirmDeleteBilhete = async () => {
+    if (!deletingBilheteTarget || !onUpdateNotification || isDeletingBilhete) return;
+    setIsDeletingBilhete(true);
+    try {
+      const nextLista = listaBilhetes.filter(
+        (item, idx) =>
+          !(idx === deletingBilheteTarget.index && item.id === deletingBilheteTarget.bilhete.id)
+      );
+      const deletedStatus = (deletingBilheteTarget.bilhete.statusOuParecer || '').trim();
+      const nextOutros =
+        nextLista.length === 0
+          ? ''
+          : deletedStatus && deletedStatus === (sst.outrosBilhetes || '').trim()
+          ? (nextLista[nextLista.length - 1]?.statusOuParecer || '')
+          : sst.outrosBilhetes;
+      const updatedSST = buildDetalhesSSTWithBilhetes(sst, nextLista, nextOutros);
+      await onUpdateNotification({
+        ...notification,
+        detalhesSST: updatedSST,
+        atualizadoEm: new Date().toISOString(),
+      });
+      setDeletingBilheteTarget(null);
+    } finally {
+      setIsDeletingBilhete(false);
     }
   };
 
@@ -1267,6 +1244,9 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                       <th className="py-2 px-3 w-28 text-center">Dias Decorridos</th>
                       <th className="py-2 px-3 w-40">Parecer / Situação</th>
                       <th className="py-2 px-3">Despacho / Detalhes</th>
+                      {onUpdateNotification && (
+                        <th className="py-2 px-3 w-16 text-center">Ações</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
@@ -1320,11 +1300,24 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                             </div>
                           )}
                         </td>
+                        {onUpdateNotification && (
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setDeletingBilheteTarget({ bilhete, index: bIdx })}
+                              title="Excluir bilhete do processo"
+                              aria-label={`Excluir ${bilhete.rotulo || `bilhete ${bIdx + 1}`}`}
+                              className="p-1.5 rounded text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer inline-flex items-center justify-center"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                     {listaBilhetes.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-4 text-center text-slate-400 italic">
+                        <td colSpan={onUpdateNotification ? 7 : 6} className="py-4 text-center text-slate-400 italic">
                           Nenhum bilhete registrado para este processo.
                         </td>
                       </tr>
@@ -1534,6 +1527,80 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   <Trash2 className="w-3.5 h-3.5" />
                 )}
                 <span>{isDeletingLog ? 'Excluindo...' : 'Sim, Excluir Registro'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingBilheteTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3.5 bg-rose-700 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-100 shrink-0" />
+                <h3 className="text-sm font-bold">Excluir Bilhete do Processo</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeletingBilheteTarget(null)}
+                disabled={isDeletingBilhete}
+                className="p-1 rounded-lg text-rose-100 hover:text-white hover:bg-rose-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-xs sm:text-sm text-slate-700">
+              <p>
+                Tem certeza de que deseja <strong>excluir permanentemente</strong> este bilhete do controle do processo?
+              </p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1 text-xs">
+                <p>
+                  <span className="text-slate-500">Identificação:</span>{' '}
+                  <strong className="text-slate-900">{deletingBilheteTarget.bilhete.rotulo || 'Bilhete'}</strong>
+                </p>
+                <p>
+                  <span className="text-slate-500">Data:</span>{' '}
+                  <span className="font-mono text-slate-800">{deletingBilheteTarget.bilhete.data ? formatDateBR(deletingBilheteTarget.bilhete.data) : '-'}</span>
+                </p>
+                {deletingBilheteTarget.bilhete.statusOuParecer && (
+                  <p>
+                    <span className="text-slate-500">Parecer / Situação:</span>{' '}
+                    <span className="font-semibold text-slate-800">{deletingBilheteTarget.bilhete.statusOuParecer}</span>
+                  </p>
+                )}
+                {deletingBilheteTarget.bilhete.despacho && (
+                  <p className="text-slate-600 pt-1 border-t border-slate-200/70">
+                    {deletingBilheteTarget.bilhete.despacho}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeletingBilheteTarget(null)}
+                disabled={isDeletingBilhete}
+                className="px-4 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmDeleteBilhete()}
+                disabled={isDeletingBilhete}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 disabled:opacity-60 rounded-lg cursor-pointer"
+              >
+                {isDeletingBilhete ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>{isDeletingBilhete ? 'Excluindo...' : 'Sim, Excluir Bilhete'}</span>
               </button>
             </div>
           </div>

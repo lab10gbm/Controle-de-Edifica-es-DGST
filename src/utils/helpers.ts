@@ -1,4 +1,4 @@
-import { BuildingNotification } from '../types';
+import { BilheteItem, BuildingNotification, SSTProcessDetails } from '../types';
 
 export function getTodayISO(): string {
   const now = new Date();
@@ -776,3 +776,143 @@ export function exportToCSV(items: BuildingNotification[], filename = 'processos
   link.click();
   document.body.removeChild(link);
 }
+
+export function deriveListaBilhetes(
+  recordId: string,
+  sst?: SSTProcessDetails
+): BilheteItem[] {
+  const details = sst || {};
+  const dataBilheteFmt = formatDateBR(details.dataBilhete || details.bilhetes);
+  const ultimoBilheteFmt = formatDateBR(details.ultimoBilhete);
+  const diasBilheteVal =
+    details.diasBilhetes !== undefined && details.diasBilhetes !== ''
+      ? details.diasBilhetes
+      : (details.diasBilhete ?? 0);
+  const diasUltimoBilheteVal =
+    details.diasUltimoBilhete !== undefined && details.diasUltimoBilhete !== ''
+      ? details.diasUltimoBilhete
+      : 0;
+  const outrosBilhetesVal = details.outrosBilhetes || '';
+
+  const rawLista: BilheteItem[] =
+    details.listaBilhetes && details.listaBilhetes.length > 0
+      ? details.listaBilhetes
+      : [
+          ...(dataBilheteFmt !== '-'
+            ? [
+                {
+                  id: `b-1-${recordId}`,
+                  ordem: 1,
+                  tipo: 'primeiro' as const,
+                  tipoDetalhe: 'BILHETE' as const,
+                  rotulo: '1º Bilhete',
+                  data: dataBilheteFmt,
+                  dias: diasBilheteVal,
+                  statusOuParecer: 'BILHETE 1',
+                  despacho: `Primeiro bilhete lançado com ${diasBilheteVal} dia(s) decorridos.`,
+                  autor: 'Fiscal SST 10º GBM',
+                },
+              ]
+            : []),
+          ...(ultimoBilheteFmt !== '-'
+            ? [
+                {
+                  id: `b-ultimo-${recordId}`,
+                  ordem: 2,
+                  tipo: 'ultimo' as const,
+                  tipoDetalhe: 'RETORNO' as const,
+                  rotulo: 'Último Bilhete',
+                  data: ultimoBilheteFmt,
+                  dias: diasUltimoBilheteVal,
+                  statusOuParecer: outrosBilhetesVal || 'Último Bilhete',
+                  despacho: outrosBilhetesVal
+                    ? `Parecer: ${outrosBilhetesVal}`
+                    : `Último bilhete registrado com ${diasUltimoBilheteVal} dia(s) decorridos.`,
+                  autor: 'Fiscal SST 10º GBM',
+                },
+              ]
+            : []),
+        ];
+
+  return rawLista.map((b, idx) => {
+    if (idx === 0 || b.tipo === 'primeiro' || b.ordem === 1) {
+      const isCopiadoErrado =
+        b.statusOuParecer &&
+        b.statusOuParecer === outrosBilhetesVal &&
+        outrosBilhetesVal.toUpperCase() !== 'BILHETE 1';
+      const statusPrimeiro =
+        !b.statusOuParecer || isCopiadoErrado ? 'BILHETE 1' : b.statusOuParecer;
+      return {
+        ...b,
+        rotulo: b.rotulo || '1º Bilhete',
+        statusOuParecer: statusPrimeiro,
+        despacho:
+          b.despacho && (!outrosBilhetesVal || !b.despacho.includes(outrosBilhetesVal))
+            ? b.despacho
+            : `Primeiro bilhete lançado com ${b.dias || 0} dia(s) decorridos.`,
+      };
+    }
+    if (
+      (idx === rawLista.length - 1 || b.tipo === 'ultimo') &&
+      (!b.statusOuParecer || b.statusOuParecer === 'Concluído')
+    ) {
+      return {
+        ...b,
+        rotulo: b.rotulo || 'Último Bilhete',
+        statusOuParecer: outrosBilhetesVal || b.statusOuParecer || 'Último Bilhete',
+        despacho: outrosBilhetesVal ? `Parecer: ${outrosBilhetesVal}` : b.despacho,
+      };
+    }
+    return b;
+  });
+}
+
+export function buildDetalhesSSTWithBilhetes(
+  currentSST: SSTProcessDetails | undefined,
+  nextLista: BilheteItem[],
+  explicitOutrosBilhetes?: string
+): SSTProcessDetails {
+  const base = { ...(currentSST || {}) };
+  const normalized = nextLista.map((b, idx) => ({
+    ...b,
+    ordem: idx + 1,
+  }));
+
+  if (normalized.length === 0) {
+    return {
+      ...base,
+      listaBilhetes: [],
+      dataBilhete: '',
+      bilhetes: '',
+      diasBilhete: '',
+      diasBilhetes: '',
+      ultimoBilhete: '',
+      diasUltimoBilhete: '',
+      ...(explicitOutrosBilhetes !== undefined
+        ? { outrosBilhetes: explicitOutrosBilhetes }
+        : {}),
+    };
+  }
+
+  const first = normalized[0];
+  const retornoItems = normalized.filter(
+    (b) => b.tipo === 'ultimo' || b.tipoDetalhe === 'RETORNO'
+  );
+  const lastRetorno =
+    retornoItems.length > 0 ? retornoItems[retornoItems.length - 1] : undefined;
+
+  return {
+    ...base,
+    listaBilhetes: normalized,
+    dataBilhete: first?.data ? formatDateBR(first.data) : '',
+    bilhetes: first?.data ? formatDateBR(first.data) : '',
+    diasBilhete: first?.dias ?? '',
+    diasBilhetes: first?.dias ?? '',
+    ultimoBilhete: lastRetorno?.data ? formatDateBR(lastRetorno.data) : '',
+    diasUltimoBilhete: lastRetorno ? (lastRetorno.dias ?? '') : '',
+    ...(explicitOutrosBilhetes !== undefined
+      ? { outrosBilhetes: explicitOutrosBilhetes }
+      : {}),
+  };
+}
+

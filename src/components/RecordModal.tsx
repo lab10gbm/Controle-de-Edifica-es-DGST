@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   BuildingNotification, 
   StatusType, 
-  DocumentType 
+  DocumentType,
+  BilheteItem
 } from '../types';
 import { OBM_LIST, STATUS_LIST, LOCALIZACAO_LIST, TIPOS_PROCESSO_LIST } from '../data/initialData';
-import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST } from '../utils/helpers';
+import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST, deriveListaBilhetes, buildDetalhesSSTWithBilhetes } from '../utils/helpers';
 import { cleanProcessLinkValue } from '../utils/processLinks';
 import { 
   X, 
@@ -22,7 +23,8 @@ import {
   Check,
   Clock,
   Link2,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Layers
 } from 'lucide-react';
 
 interface RecordModalProps {
@@ -63,6 +65,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [localizacao, setLocalizacao] = useState('PROTOCOLO');
   const [docGerado, setDocGerado] = useState('');
   const [dataAoDiretor, setDataAoDiretor] = useState('');
+  const [showDocGeradoFields, setShowDocGeradoFields] = useState(false);
   const [dataPronto, setDataPronto] = useState('');
   const [outrosBilhetes, setOutrosBilhetes] = useState('');
   const [processoAntigo, setProcessoAntigo] = useState('');
@@ -89,10 +92,16 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [proprietarioNome, setProprietarioNome] = useState('');
   const [proprietarioDoc, setProprietarioDoc] = useState('');
   const [proprietarioTelefone, setProprietarioTelefone] = useState('');
-  const [proprietarioEmail, setProprietarioEmail] = useState('');
-  const [sindicoNome, setSindicoNome] = useState('');
-  const [sindicoCpf, setSindicoCpf] = useState('');
-  const [sindicoTelefone, setSindicoTelefone] = useState('');
+
+  // Controle e Relação de Bilhetes do Processo (Seção 4)
+  const [listaBilhetes, setListaBilhetes] = useState<BilheteItem[]>([]);
+  const [isAddingBilheteModal, setIsAddingBilheteModal] = useState(false);
+  const [novoDetalheTipo, setNovoDetalheTipo] = useState<'BILHETE' | 'RETORNO'>('BILHETE');
+  const [novoBilheteData, setNovoBilheteData] = useState(() => getTodayISO());
+  const [novoBilheteDias, setNovoBilheteDias] = useState('0');
+  const [novoBilheteStatus, setNovoBilheteStatus] = useState('EM ANÁLISE');
+  const [novoBilheteAutor, setNovoBilheteAutor] = useState('Fiscal SST 10º GBM');
+  const [novoBilheteDespacho, setNovoBilheteDespacho] = useState('');
 
   // Fiscalização (Totalmente editável pelo usuário sem dados inventados)
   const [fiscalResponsavel, setFiscalResponsavel] = useState('');
@@ -309,8 +318,31 @@ export const RecordModal: React.FC<RecordModalProps> = ({
           ? 'INTERNET'
           : rawLoc || 'PROTOCOLO';
       setLocalizacao(normalizedLoc);
-      setDocGerado(editingRecord.detalhesSST?.docGerado || '');
-      setDataAoDiretor(editingRecord.detalhesSST?.dataAoDiretor || editingRecord.detalhesSST?.aoDiretor || '');
+      const editDocGerado = editingRecord.detalhesSST?.docGerado || '';
+      const rawEditDataAoDiretor = editingRecord.detalhesSST?.dataAoDiretor || editingRecord.detalhesSST?.aoDiretor || '';
+      const fallbackAnoDoc =
+        editingRecord.anoExercicio ||
+        (editingRecord.dataEntrada || editingRecord.dataExpedicao || '').match(/\b(20\d{2})\b/)?.[1] ||
+        getTodayISO().slice(0, 4);
+      let editDataAoDiretorISO = '';
+      if (rawEditDataAoDiretor.trim() && rawEditDataAoDiretor !== '-' && rawEditDataAoDiretor !== '- - - -') {
+        const cleanAoDir = rawEditDataAoDiretor.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(cleanAoDir)) {
+          editDataAoDiretorISO = cleanAoDir;
+        } else {
+          const brFull = cleanAoDir.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+          const brShort = cleanAoDir.match(/^(\d{1,2})\/(\d{1,2})$/);
+          if (brFull) {
+            const y = brFull[3].length === 2 ? `20${brFull[3]}` : brFull[3];
+            editDataAoDiretorISO = `${y}-${brFull[2].padStart(2, '0')}-${brFull[1].padStart(2, '0')}`;
+          } else if (brShort) {
+            editDataAoDiretorISO = `${fallbackAnoDoc}-${brShort[2].padStart(2, '0')}-${brShort[1].padStart(2, '0')}`;
+          }
+        }
+      }
+      setDocGerado(editDocGerado);
+      setDataAoDiretor(editDataAoDiretorISO);
+      setShowDocGeradoFields(Boolean(editDocGerado.trim() || editDataAoDiretorISO || rawEditDataAoDiretor.trim()));
       setDataPronto(editingRecord.detalhesSST?.dataPronto || '');
       setOutrosBilhetes(editingRecord.detalhesSST?.outrosBilhetes || '');
       setProcessoAntigo(cleanProcessLinkValue(editingRecord.detalhesSST?.processoAntigo));
@@ -352,10 +384,6 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setProprietarioNome(propNomeEdit);
       setProprietarioDoc(propDocEdit);
       setProprietarioTelefone(editingRecord.proprietario?.telefone || '');
-      setProprietarioEmail(editingRecord.proprietario?.email || '');
-      setSindicoNome(editingRecord.proprietario?.sindicoNome || '');
-      setSindicoCpf(editingRecord.proprietario?.sindicoCpf || '');
-      setSindicoTelefone(editingRecord.proprietario?.sindicoTelefone || '');
 
       const isSameAsRequerente =
         Boolean(reqNomeEdit.trim()) &&
@@ -366,6 +394,15 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setFiscalResponsavel(editingRecord.fiscalResponsavel || '');
       setMatriculaFiscal(editingRecord.matriculaFiscal || '');
       setProcessoAdministrativo(editingRecord.processoAdministrativo || '');
+
+      setListaBilhetes(deriveListaBilhetes(editingRecord.id, editingRecord.detalhesSST));
+      setIsAddingBilheteModal(false);
+      setNovoDetalheTipo('BILHETE');
+      setNovoBilheteData(getTodayISO());
+      setNovoBilheteDias('0');
+      setNovoBilheteStatus('EM ANÁLISE');
+      setNovoBilheteAutor(editingRecord.fiscalResponsavel?.trim() || 'Fiscal SST 10º GBM');
+      setNovoBilheteDespacho('');
 
       setExigencias(editingRecord.exigencias || []);
       setObservacoes(editingRecord.observacoes || '');
@@ -390,6 +427,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setLocalizacao('PROTOCOLO');
       setDocGerado('');
       setDataAoDiretor('');
+      setShowDocGeradoFields(false);
       setDataPronto('');
       setOutrosBilhetes('');
       setProcessoAntigo('');
@@ -416,14 +454,19 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setProprietarioNome('');
       setProprietarioDoc('');
       setProprietarioTelefone('');
-      setProprietarioEmail('');
-      setSindicoNome('');
-      setSindicoCpf('');
-      setSindicoTelefone('');
 
       setFiscalResponsavel('');
       setMatriculaFiscal('');
       setProcessoAdministrativo('');
+
+      setListaBilhetes([]);
+      setIsAddingBilheteModal(false);
+      setNovoDetalheTipo('BILHETE');
+      setNovoBilheteData(hojeISO);
+      setNovoBilheteDias('0');
+      setNovoBilheteStatus('EM ANÁLISE');
+      setNovoBilheteAutor('Fiscal SST 10º GBM');
+      setNovoBilheteDespacho('');
 
       setExigencias([]);
       setObservacoes('');
@@ -442,6 +485,34 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
   const handleRemoveExigencia = (index: number) => {
     setExigencias((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddBilheteInModal = () => {
+    if (!novoBilheteData.trim()) return;
+    const dataFormatada = formatDateBR(novoBilheteData.trim());
+    const proximoNumero = listaBilhetes.length + 1;
+    const detalheRotulo =
+      novoDetalheTipo === 'RETORNO' ? `Retorno ${proximoNumero}B` : `Bilhete ${proximoNumero}`;
+    const autorRegistro = novoBilheteAutor.trim() || fiscalResponsavel.trim() || 'Fiscal SST 10º GBM';
+    const novoItem: BilheteItem = {
+      id: `b-manual-${Date.now()}`,
+      ordem: proximoNumero,
+      tipo: novoDetalheTipo === 'RETORNO' ? 'ultimo' : proximoNumero === 1 ? 'primeiro' : 'intermediario',
+      tipoDetalhe: novoDetalheTipo,
+      rotulo: detalheRotulo,
+      data: dataFormatada,
+      dias: novoBilheteDias.trim() || '0',
+      statusOuParecer: novoBilheteStatus.trim() || 'Registrado',
+      despacho: novoBilheteDespacho.trim() || `Bilhete registrado por ${autorRegistro}.`,
+      autor: autorRegistro,
+    };
+    setListaBilhetes((prev) => [...prev, novoItem]);
+    setIsAddingBilheteModal(false);
+    setNovoBilheteDespacho('');
+  };
+
+  const handleRemoveBilheteInModal = (index: number) => {
+    setListaBilhetes((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const validate = (): boolean => {
@@ -518,11 +589,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
           ? requerenteCpfCnpj.trim()
           : proprietarioDoc.trim(),
         telefone: proprietarioTelefone.trim(),
-        email: proprietarioEmail.trim(),
+        email: editingRecord?.proprietario?.email || '',
         tipoVinculo: proprietarioTipoVinculo.trim() || undefined,
-        sindicoNome: sindicoNome.trim() || undefined,
-        sindicoCpf: sindicoCpf.trim() || undefined,
-        sindicoTelefone: sindicoTelefone.trim() || undefined,
+        sindicoNome: editingRecord?.proprietario?.sindicoNome || undefined,
+        sindicoCpf: editingRecord?.proprietario?.sindicoCpf || undefined,
+        sindicoTelefone: editingRecord?.proprietario?.sindicoTelefone || undefined,
       },
       fiscalResponsavel: fiscalResponsavel.trim(),
       matriculaFiscal: matriculaFiscal.trim(),
@@ -557,20 +628,28 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         ? dataExpedicao.slice(0, 4)
         : editingRecord?.anoExercicio,
       ownerUid: editingRecord?.ownerUid,
-      detalhesSST: {
-        ...(editingRecord?.detalhesSST || {}),
-        codigo: finalCodigoSST,
-        entradaSST: formatDateBR(dataExpedicao),
-        localizacao: localizacao.trim(),
-        docGerado: docGerado.trim() || editingRecord?.detalhesSST?.docGerado || '',
-        dataAoDiretor: dataAoDiretor.trim() || editingRecord?.detalhesSST?.dataAoDiretor || '',
-        aoDiretor: dataAoDiretor.trim() || editingRecord?.detalhesSST?.aoDiretor || '',
-        dataPronto: dataPronto.trim(),
-        outrosBilhetes: outrosBilhetes.trim() || editingRecord?.detalhesSST?.outrosBilhetes || '',
-        processoAntigo: cleanProcessLinkValue(processoAntigo),
-        numDocAntigo: cleanProcessLinkValue(numDocAntigo).toUpperCase(),
-        processoSeguinte: cleanProcessLinkValue(processoSeguinte),
-      },
+      detalhesSST: buildDetalhesSSTWithBilhetes(
+        {
+          ...(editingRecord?.detalhesSST || {}),
+          codigo: finalCodigoSST,
+          entradaSST: formatDateBR(dataExpedicao),
+          localizacao: localizacao.trim(),
+          docGerado: docGerado.trim(),
+          dataAoDiretor: dataAoDiretor.trim()
+            ? (/^\d{4}-\d{2}-\d{2}$/.test(dataAoDiretor.trim()) ? formatDateBR(dataAoDiretor.trim()) : dataAoDiretor.trim())
+            : '',
+          aoDiretor: dataAoDiretor.trim()
+            ? (/^\d{4}-\d{2}-\d{2}$/.test(dataAoDiretor.trim()) ? formatDateBR(dataAoDiretor.trim()) : dataAoDiretor.trim())
+            : '',
+          dataPronto: dataPronto.trim(),
+          outrosBilhetes: outrosBilhetes.trim(),
+          processoAntigo: cleanProcessLinkValue(processoAntigo),
+          numDocAntigo: cleanProcessLinkValue(numDocAntigo).toUpperCase(),
+          processoSeguinte: cleanProcessLinkValue(processoSeguinte),
+        },
+        listaBilhetes,
+        outrosBilhetes.trim()
+      ),
     };
 
     onSave(updatedRecord, isEditing);
@@ -823,8 +902,8 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               </div>
 
               <div className="sm:col-span-7">
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                  <div className="sm:col-span-7">
+                <div className="space-y-3">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
                       Requerente (Nome / Razão Social) <span className="text-red-600">*</span>
                     </label>
@@ -849,7 +928,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                     )}
                   </div>
 
-                  <div className="sm:col-span-5">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
                       CNPJ / CPF do Requerente
                     </label>
@@ -983,33 +1062,60 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  DOC. GERADO
-                </label>
-                <input
-                  type="text"
-                  value={docGerado}
-                  onChange={(e) => setDocGerado(e.target.value.toUpperCase())}
-                  placeholder="Ex: DI-1029, LE-112, CAA-345"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600/20 text-slate-900 font-mono font-bold uppercase"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">Documento emitido na SST</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Data do DOC. GERADO / Ao Diretor
-                </label>
-                <input
-                  type="text"
-                  value={dataAoDiretor}
-                  onChange={(e) => setDataAoDiretor(e.target.value)}
-                  placeholder="Ex: 13/01/2026 ou 13/01"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600/20 text-slate-900 font-mono font-semibold"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">Data que figura abaixo do DOC. GERADO</p>
-              </div>
+              {!showDocGeradoFields ? (
+                <div className="sm:col-span-2 flex flex-col justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowDocGeradoFields(true)}
+                    className="w-full px-3 py-2 text-xs font-semibold text-blue-800 bg-blue-50/70 hover:bg-blue-100/80 border border-dashed border-blue-300 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Adicionar Doc. Gerado</span>
+                  </button>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Clique para informar o DOC. GERADO e a data
+                  </p>
+                </div>
+              ) : (
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      DOC. GERADO e Data (Ao Diretor)
+                    </label>
+                    {!docGerado.trim() && !dataAoDiretor.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setShowDocGeradoFields(false)}
+                        className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer shrink-0"
+                      >
+                        Ocultar
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 focus-within:bg-white focus-within:ring-1 focus-within:ring-blue-600 focus-within:border-blue-600 transition-colors">
+                    <input
+                      type="text"
+                      value={docGerado}
+                      onChange={(e) => setDocGerado(e.target.value.toUpperCase())}
+                      placeholder="Ex: DI-1029, LE-112, CAA-345"
+                      aria-label="DOC. GERADO"
+                      className="min-w-0 flex-1 px-2 py-1 text-xs bg-white border border-slate-200 rounded font-mono font-bold uppercase text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:border-blue-500"
+                    />
+                    <span className="text-slate-400 font-bold select-none">·</span>
+                    <input
+                      type="date"
+                      value={dataAoDiretor}
+                      onChange={(e) => setDataAoDiretor(e.target.value)}
+                      aria-label="Data do DOC. GERADO / Ao Diretor"
+                      title="Data do DOC. GERADO / Ao Diretor"
+                      className="w-[138px] shrink-0 px-2 py-1 text-xs bg-white border border-slate-200 rounded font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Documento emitido na SST e data ao Diretor
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -1158,7 +1264,13 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 <span>3. Proprietário e Responsável Legal <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
               </div>
 
-              <label className="inline-flex items-center gap-2 text-[11px] font-semibold normal-case tracking-normal text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-md cursor-pointer select-none transition-colors">
+              <label
+                className={`inline-flex items-center gap-2 text-[11px] font-semibold normal-case tracking-normal px-2.5 py-1 rounded-md cursor-pointer select-none transition-colors border ${
+                  repetirRequerente
+                    ? 'text-purple-900 bg-purple-100 border-purple-400 shadow-xs'
+                    : 'text-purple-800 bg-purple-50 hover:bg-purple-100 border-purple-200'
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={repetirRequerente}
@@ -1177,14 +1289,19 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-              <div className="sm:col-span-3">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <div className={`sm:col-span-3 transition-opacity ${repetirRequerente ? 'opacity-65' : ''}`}>
+                <label className={`block text-xs font-semibold mb-1 ${repetirRequerente ? 'line-through text-slate-400' : 'text-slate-700'}`}>
                   Qualificação / Vínculo
                 </label>
                 <select
                   value={proprietarioTipoVinculo}
+                  disabled={repetirRequerente}
                   onChange={(e) => setProprietarioTipoVinculo(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 text-slate-800 font-medium cursor-pointer"
+                  className={`w-full px-3 py-2 text-xs border rounded-lg font-medium ${
+                    repetirRequerente
+                      ? 'bg-slate-100 border-slate-200 text-slate-400 line-through cursor-not-allowed'
+                      : 'bg-slate-50 border-slate-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 text-slate-800 cursor-pointer'
+                  }`}
                 >
                   <option value="Proprietário / Responsável Legal">Proprietário / Resp. Legal</option>
                   <option value="Proprietário">Proprietário</option>
@@ -1194,30 +1311,36 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 </select>
               </div>
 
-              <div className="sm:col-span-4">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <div className={`sm:col-span-4 transition-opacity ${repetirRequerente ? 'opacity-65' : ''}`}>
+                <label className={`block text-xs font-semibold mb-1 ${repetirRequerente ? 'line-through text-slate-400' : 'text-slate-700'}`}>
                   Nome / Razão Social
                 </label>
                 <input
                   type="text"
                   value={proprietarioNome}
+                  disabled={repetirRequerente}
                   onChange={(e) => {
                     setProprietarioNome(e.target.value);
                     if (repetirRequerente) setRepetirRequerente(false);
                   }}
                   placeholder="Nome do Proprietário, Resp. Legal ou Síndico"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 uppercase"
+                  className={`w-full px-3 py-2 text-xs border rounded-lg uppercase ${
+                    repetirRequerente
+                      ? 'bg-slate-100 border-slate-200 text-slate-400 line-through cursor-not-allowed'
+                      : 'bg-slate-50 border-slate-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 text-slate-900'
+                  }`}
                 />
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <div className={`sm:col-span-2 transition-opacity ${repetirRequerente ? 'opacity-65' : ''}`}>
+                <label className={`block text-xs font-semibold mb-1 ${repetirRequerente ? 'line-through text-slate-400' : 'text-slate-700'}`}>
                   CNPJ ou CPF
                 </label>
                 <input
                   type="text"
                   maxLength={32}
                   value={proprietarioDoc}
+                  disabled={repetirRequerente}
                   onChange={(e) => {
                     setProprietarioDoc(e.target.value);
                     if (repetirRequerente) setRepetirRequerente(false);
@@ -1232,7 +1355,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                     }
                   }}
                   placeholder="00.000.000/0000-00"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 font-mono"
+                  className={`w-full px-3 py-2 text-xs border rounded-lg font-mono ${
+                    repetirRequerente
+                      ? 'bg-slate-100 border-slate-200 text-slate-400 line-through cursor-not-allowed'
+                      : 'bg-slate-50 border-slate-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 text-slate-900'
+                  }`}
                 />
               </div>
 
@@ -1245,83 +1372,187 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   value={proprietarioTelefone}
                   onChange={(e) => setProprietarioTelefone(e.target.value)}
                   placeholder="(24) 3365-0000"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 text-slate-900"
                 />
-              </div>
-            </div>
-
-            <div className="mt-3 p-3 rounded-lg bg-purple-50/40 border border-purple-200/70">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-purple-900 mb-2">
-                Síndico / Contato Complementar <span className="text-slate-500 font-normal lowercase">(opcional — útil quando o requerente é condomínio ou empresa)</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                <div className="sm:col-span-5">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Nome do Síndico / Representante
-                  </label>
-                  <input
-                    type="text"
-                    value={sindicoNome}
-                    onChange={(e) => setSindicoNome(e.target.value)}
-                    placeholder="Nome completo do Síndico ou Responsável"
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600 uppercase"
-                  />
-                </div>
-                <div className="sm:col-span-3">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    CPF do Síndico
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={32}
-                    value={sindicoCpf}
-                    onChange={(e) => setSindicoCpf(e.target.value)}
-                    onBlur={() => {
-                      const trimmed = sindicoCpf.trim();
-                      if (trimmed) {
-                        const formatted = formatCpfCnpj(trimmed);
-                        if (formatted && formatted !== '-') {
-                          setSindicoCpf(formatted);
-                        }
-                      }
-                    }}
-                    placeholder="000.000.000-00"
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600 font-mono"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Telefone Síndico
-                  </label>
-                  <input
-                    type="text"
-                    value={sindicoTelefone}
-                    onChange={(e) => setSindicoTelefone(e.target.value)}
-                    placeholder="(24) 99999-0000"
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    E-mail
-                  </label>
-                  <input
-                    type="email"
-                    value={proprietarioEmail}
-                    onChange={(e) => setProprietarioEmail(e.target.value)}
-                    placeholder="contato@email.com"
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600"
-                  />
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Seção 4: Endereço & Localização (Opcional) */}
+          {/* Seção 4: Controle e Relação de Bilhetes do Processo */}
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-3 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-700">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-600" />
+                <span>4. Controle e Relação de Bilhetes do Processo <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddingBilheteModal((prev) => !prev)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold normal-case tracking-normal text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isAddingBilheteModal ? 'Fechar Formulário' : 'Adicionar Bilhete'}</span>
+              </button>
+            </div>
+
+            {isAddingBilheteModal && (
+              <div className="mb-3 p-3.5 bg-blue-50/50 rounded-lg border border-blue-200 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block mb-1">Tipo de Detalhe</label>
+                    <select
+                      value={novoDetalheTipo}
+                      onChange={(e) => setNovoDetalheTipo(e.target.value as 'BILHETE' | 'RETORNO')}
+                      className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                    >
+                      <option value="BILHETE">Bilhete</option>
+                      <option value="RETORNO">Retorno</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block mb-1">Data do Bilhete</label>
+                    <input
+                      type="date"
+                      value={novoBilheteData}
+                      onChange={(e) => setNovoBilheteData(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block mb-1">Dias Decorridos</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={novoBilheteDias}
+                      onChange={(e) => setNovoBilheteDias(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block mb-1">Parecer / Situação</label>
+                    <input
+                      type="text"
+                      value={novoBilheteStatus}
+                      onChange={(e) => setNovoBilheteStatus(e.target.value)}
+                      placeholder="Ex: GERADO DI, FINALIZADO"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block mb-1">Autor do Registro</label>
+                    <input
+                      type="text"
+                      value={novoBilheteAutor}
+                      onChange={(e) => setNovoBilheteAutor(e.target.value)}
+                      placeholder="Ex: Fiscal SST 10º GBM"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">Conteúdo do Despacho / Observações</label>
+                  <input
+                    type="text"
+                    value={novoBilheteDespacho}
+                    onChange={(e) => setNovoBilheteDespacho(e.target.value)}
+                    placeholder="Descreva determinações ou encaminhamentos deste bilhete..."
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingBilheteModal(false)}
+                    className="px-3 py-1 text-xs font-semibold text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddBilheteInModal}
+                    className="px-3 py-1 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Incluir Bilhete</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {listaBilhetes.length > 0 ? (
+              <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-1.5 px-2.5 w-10 text-center">#</th>
+                      <th className="py-1.5 px-2.5">Identificação</th>
+                      <th className="py-1.5 px-2.5">Data</th>
+                      <th className="py-1.5 px-2.5 text-center">Dias</th>
+                      <th className="py-1.5 px-2.5">Parecer / Situação</th>
+                      <th className="py-1.5 px-2.5">Despacho</th>
+                      <th className="py-1.5 px-2.5 w-12 text-center">Excluir</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {listaBilhetes.map((bilhete, bIdx) => (
+                      <tr key={bilhete.id || bIdx} className="hover:bg-slate-50/70">
+                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-slate-500">
+                          {bIdx + 1}
+                        </td>
+                        <td className="py-1.5 px-2.5 font-semibold text-slate-900 whitespace-nowrap">
+                          {bilhete.rotulo || (bIdx === 0 ? '1º Bilhete' : 'Último Bilhete')}
+                        </td>
+                        <td className="py-1.5 px-2.5 font-mono text-slate-800 whitespace-nowrap">
+                          {bilhete.data ? formatDateBR(bilhete.data) : '-'}
+                        </td>
+                        <td className="py-1.5 px-2.5 text-center font-mono text-slate-700">
+                          {bilhete.dias ?? 0}d
+                        </td>
+                        <td className="py-1.5 px-2.5">
+                          <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-800 whitespace-nowrap">
+                            {bilhete.statusOuParecer || 'Registrado'}
+                          </span>
+                        </td>
+                        <td className="py-1.5 px-2.5 text-[11px] text-slate-600">
+                          <div>{bilhete.despacho || '-'}</div>
+                          {bilhete.autor && (
+                            <div className="text-[10px] text-slate-400">Autor: {bilhete.autor}</div>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveBilheteInModal(bIdx)}
+                            title="Excluir bilhete"
+                            aria-label={`Excluir ${bilhete.rotulo || `bilhete ${bIdx + 1}`}`}
+                            className="p-1 rounded text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+                Nenhum bilhete registrado neste processo. Clique em <strong>Adicionar Bilhete</strong> para lançar.
+              </p>
+            )}
+          </div>
+
+          {/* Seção 5: Endereço & Localização (Opcional) */}
           <div>
             <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-700">
               <MapPin className="w-4 h-4 text-emerald-600" />
-              <span>4. Endereço e Localização <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
+              <span>5. Endereço e Localização <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -1418,11 +1649,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
           </div>
 
-          {/* Seção 5: Fiscalização & Processo Administrativo (Opcional) */}
+          {/* Seção 6: Fiscalização & Processo Administrativo (Opcional) */}
           <div>
             <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-700">
               <ShieldCheck className="w-4 h-4 text-red-600" />
-              <span>5. Fiscalização e Processo Administrativo CBMERJ <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
+              <span>6. Fiscalização e Processo Administrativo CBMERJ <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1468,11 +1699,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
           </div>
 
-          {/* Seção 6: Exigências e Observações Técnicas */}
+          {/* Seção 7: Exigências e Observações Técnicas */}
           <div>
             <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-700">
               <FileText className="w-4 h-4 text-amber-600" />
-              <span>6. Exigências de Segurança Contra Incêndio & Observações</span>
+              <span>7. Exigências de Segurança Contra Incêndio & Observações</span>
             </div>
 
             <div className="space-y-3">
