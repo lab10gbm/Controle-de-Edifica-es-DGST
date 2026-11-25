@@ -519,15 +519,15 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </div>
 
               <div>
-                <span className="text-slate-500 block text-[11px] font-medium">CPF / CNPJ:</span>
+                <span className="text-slate-500 block text-[11px] font-medium">CPF / CNPJ do Requerente:</span>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="font-mono text-slate-900 font-bold text-xs">
-                    {formatCpfCnpj(notification.proprietario?.cpfOuCnpj) || 'Não informado'}
+                    {formatCpfCnpj(notification.requerenteCpfCnpj || notification.proprietario?.cpfOuCnpj) || 'Não informado'}
                   </span>
-                  {notification.proprietario?.cpfOuCnpj && (
+                  {(notification.requerenteCpfCnpj || notification.proprietario?.cpfOuCnpj) && (
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(notification.proprietario.cpfOuCnpj, 'cpf-req')}
+                      onClick={() => copyToClipboard(notification.requerenteCpfCnpj || notification.proprietario.cpfOuCnpj, 'cpf-req')}
                       className="text-slate-400 hover:text-slate-700 p-0.5 cursor-pointer inline-flex items-center"
                       title="Copiar CPF/CNPJ"
                     >
@@ -544,12 +544,54 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 </strong>
               </div>
 
-              <div className="pt-1.5 border-t border-slate-100">
-                <span className="text-slate-500 block text-[11px] font-medium">Contato / Telefone:</span>
-                <span className="text-slate-800 font-medium">
-                  {notification.proprietario?.telefone || notification.proprietario?.email || 'Não cadastrado'}
-                </span>
-              </div>
+              {(notification.proprietario?.nomeOuRazaoSocial ||
+                notification.proprietario?.cpfOuCnpj ||
+                notification.proprietario?.telefone ||
+                notification.proprietario?.email) && (
+                <div className="pt-2 border-t border-slate-100 space-y-1">
+                  <span className="text-purple-800 block text-[10px] font-bold uppercase tracking-wider">
+                    {notification.proprietario?.tipoVinculo || 'Proprietário / Responsável Legal'}
+                  </span>
+                  {notification.proprietario?.nomeOuRazaoSocial && (
+                    <div className="text-slate-900 font-semibold text-xs">
+                      {notification.proprietario.nomeOuRazaoSocial}
+                    </div>
+                  )}
+                  {notification.proprietario?.cpfOuCnpj && (
+                    <div className="font-mono text-[11px] text-slate-600">
+                      Doc: {formatCpfCnpj(notification.proprietario.cpfOuCnpj)}
+                    </div>
+                  )}
+                  {(notification.proprietario?.telefone || notification.proprietario?.email) && (
+                    <div className="text-slate-700 font-medium text-[11px]">
+                      {[notification.proprietario?.telefone, notification.proprietario?.email].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(notification.proprietario?.sindicoNome ||
+                notification.proprietario?.sindicoCpf ||
+                notification.proprietario?.sindicoTelefone) && (
+                <div className="pt-2 border-t border-slate-100 space-y-0.5">
+                  <span className="text-indigo-800 block text-[10px] font-bold uppercase tracking-wider">
+                    Síndico / Representante
+                  </span>
+                  {notification.proprietario?.sindicoNome && (
+                    <div className="text-slate-900 font-semibold text-xs">
+                      {notification.proprietario.sindicoNome}
+                    </div>
+                  )}
+                  <div className="text-[11px] text-slate-600 flex flex-wrap gap-x-2">
+                    {notification.proprietario?.sindicoCpf && (
+                      <span className="font-mono">CPF: {formatCpfCnpj(notification.proprietario.sindicoCpf)}</span>
+                    )}
+                    {notification.proprietario?.sindicoTelefone && (
+                      <span>Tel: {notification.proprietario.sindicoTelefone}</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Card 2: Endereço & Localização */}

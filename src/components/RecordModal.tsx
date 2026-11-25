@@ -5,7 +5,7 @@ import {
   DocumentType 
 } from '../types';
 import { OBM_LIST, STATUS_LIST, LOCALIZACAO_LIST, TIPOS_PROCESSO_LIST } from '../data/initialData';
-import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST } from '../utils/helpers';
+import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST } from '../utils/helpers';
 import { cleanProcessLinkValue } from '../utils/processLinks';
 import { 
   X, 
@@ -57,6 +57,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [codigoDocumento, setCodigoDocumento] = useState('');
   const [edificacao, setEdificacao] = useState('');
   const [requerente, setRequerente] = useState('');
+  const [requerenteCpfCnpj, setRequerenteCpfCnpj] = useState('');
   const [tipoProcesso, setTipoProcesso] = useState<string>('CERTIFICADO DE APROVAÇÃO');
   const [origem, setOrigem] = useState('10º GBM - ANGRA DOS REIS');
   const [localizacao, setLocalizacao] = useState('PROTOCOLO');
@@ -82,11 +83,16 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [cep, setCep] = useState('');
   const [pontoReferencia, setPontoReferencia] = useState('');
 
-  // Proprietário / Responsável (Opcional)
+  // Proprietário / Responsável Legal / Síndico (Opcional)
+  const [repetirRequerente, setRepetirRequerente] = useState<boolean>(false);
+  const [proprietarioTipoVinculo, setProprietarioTipoVinculo] = useState('Proprietário / Responsável Legal');
   const [proprietarioNome, setProprietarioNome] = useState('');
   const [proprietarioDoc, setProprietarioDoc] = useState('');
   const [proprietarioTelefone, setProprietarioTelefone] = useState('');
   const [proprietarioEmail, setProprietarioEmail] = useState('');
+  const [sindicoNome, setSindicoNome] = useState('');
+  const [sindicoCpf, setSindicoCpf] = useState('');
+  const [sindicoTelefone, setSindicoTelefone] = useState('');
 
   // Fiscalização (Totalmente editável pelo usuário sem dados inventados)
   const [fiscalResponsavel, setFiscalResponsavel] = useState('');
@@ -279,9 +285,20 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setIs4BlocksMode(!isNonStandardText);
       applyValueToBlocks(rawProcVal, fallbackCodEdit, fallbackAnoEdit);
 
+      const reqNomeEdit = editingRecord.requerente || editingRecord.edificacao || '';
+      const propNomeEdit = editingRecord.proprietario?.nomeOuRazaoSocial || '';
+      const propDocEdit = editingRecord.proprietario?.cpfOuCnpj || '';
+      const reqDocEdit =
+        editingRecord.requerenteCpfCnpj !== undefined
+          ? (editingRecord.requerenteCpfCnpj || '')
+          : (propDocEdit && (!propNomeEdit.trim() || propNomeEdit.trim().toUpperCase() === reqNomeEdit.trim().toUpperCase())
+              ? propDocEdit
+              : '');
+
       setCodigoDocumento(editingRecord.codigoDocumento || '');
       setEdificacao(editingRecord.edificacao || '');
-      setRequerente(editingRecord.requerente || editingRecord.edificacao || '');
+      setRequerente(reqNomeEdit);
+      setRequerenteCpfCnpj(reqDocEdit);
       const tipo = editingRecord.tipoProcesso || editingRecord.tipoDocumento || 'CERTIFICADO DE APROVAÇÃO';
       setTipoProcesso(tipo);
       setOrigem(editingRecord.origem || editingRecord.obm || '10º GBM - ANGRA DOS REIS');
@@ -331,10 +348,20 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setCep(editingRecord.endereco?.cep || '');
       setPontoReferencia(editingRecord.endereco?.pontoReferencia || '');
 
-      setProprietarioNome(editingRecord.proprietario?.nomeOuRazaoSocial || '');
-      setProprietarioDoc(editingRecord.proprietario?.cpfOuCnpj || '');
+      setProprietarioTipoVinculo(editingRecord.proprietario?.tipoVinculo || 'Proprietário / Responsável Legal');
+      setProprietarioNome(propNomeEdit);
+      setProprietarioDoc(propDocEdit);
       setProprietarioTelefone(editingRecord.proprietario?.telefone || '');
       setProprietarioEmail(editingRecord.proprietario?.email || '');
+      setSindicoNome(editingRecord.proprietario?.sindicoNome || '');
+      setSindicoCpf(editingRecord.proprietario?.sindicoCpf || '');
+      setSindicoTelefone(editingRecord.proprietario?.sindicoTelefone || '');
+
+      const isSameAsRequerente =
+        Boolean(reqNomeEdit.trim()) &&
+        propNomeEdit.trim().toUpperCase() === reqNomeEdit.trim().toUpperCase() &&
+        reqDocEdit.trim().toUpperCase() === propDocEdit.trim().toUpperCase();
+      setRepetirRequerente(isSameAsRequerente);
 
       setFiscalResponsavel(editingRecord.fiscalResponsavel || '');
       setMatriculaFiscal(editingRecord.matriculaFiscal || '');
@@ -357,6 +384,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setCodigoDocumento('');
       setEdificacao('');
       setRequerente('');
+      setRequerenteCpfCnpj('');
       setTipoProcesso('CERTIFICADO DE APROVAÇÃO');
       setOrigem('10º GBM - ANGRA DOS REIS');
       setLocalizacao('PROTOCOLO');
@@ -383,10 +411,15 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setCep('');
       setPontoReferencia('');
 
+      setRepetirRequerente(false);
+      setProprietarioTipoVinculo('Proprietário / Responsável Legal');
       setProprietarioNome('');
       setProprietarioDoc('');
       setProprietarioTelefone('');
       setProprietarioEmail('');
+      setSindicoNome('');
+      setSindicoCpf('');
+      setSindicoTelefone('');
 
       setFiscalResponsavel('');
       setMatriculaFiscal('');
@@ -457,6 +490,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       codigoDocumento: codigoDocumento || (formattedProcesso ? `Processo ${formattedProcesso}` : 'S/N'),
       edificacao: (requerente.trim() || edificacao.trim()),
       requerente: (requerente.trim() || edificacao.trim()),
+      requerenteCpfCnpj: requerenteCpfCnpj.trim(),
       tipoProcesso: tipoProcesso.trim() || 'Processo de Regularização',
       origem: origem.trim() || obm,
       status,
@@ -477,10 +511,18 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         pontoReferencia: pontoReferencia.trim() || undefined,
       },
       proprietario: {
-        nomeOuRazaoSocial: proprietarioNome.trim() || (requerente.trim() || edificacao.trim()),
-        cpfOuCnpj: proprietarioDoc.trim(),
+        nomeOuRazaoSocial: repetirRequerente
+          ? (requerente.trim() || edificacao.trim())
+          : proprietarioNome.trim(),
+        cpfOuCnpj: repetirRequerente
+          ? requerenteCpfCnpj.trim()
+          : proprietarioDoc.trim(),
         telefone: proprietarioTelefone.trim(),
         email: proprietarioEmail.trim(),
+        tipoVinculo: proprietarioTipoVinculo.trim() || undefined,
+        sindicoNome: sindicoNome.trim() || undefined,
+        sindicoCpf: sindicoCpf.trim() || undefined,
+        sindicoTelefone: sindicoTelefone.trim() || undefined,
       },
       fiscalResponsavel: fiscalResponsavel.trim(),
       matriculaFiscal: matriculaFiscal.trim(),
@@ -781,24 +823,64 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               </div>
 
               <div className="sm:col-span-7">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Requerente (Nome / Razão Social) <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={edificacao}
-                  onChange={(e) => {
-                    setEdificacao(e.target.value);
-                    setRequerente(e.target.value);
-                  }}
-                  placeholder="Ex: CONDOMÍNIO ITAGUAÍ SHOPPING CENTER"
-                  className={`w-full px-3 py-2 text-sm bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-600/20 text-slate-900 uppercase font-medium ${
-                    errors.edificacao ? 'border-red-500' : 'border-slate-300'
-                  }`}
-                />
-                {errors.edificacao && (
-                  <p className="text-xs text-red-600 mt-1">{errors.edificacao}</p>
-                )}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                  <div className="sm:col-span-7">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Requerente (Nome / Razão Social) <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={edificacao}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEdificacao(val);
+                        setRequerente(val);
+                        if (repetirRequerente) {
+                          setProprietarioNome(val);
+                        }
+                      }}
+                      placeholder="Ex: CONDOMÍNIO ITAGUAÍ SHOPPING CENTER"
+                      className={`w-full px-3 py-2 text-sm bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-600/20 text-slate-900 uppercase font-medium ${
+                        errors.edificacao ? 'border-red-500' : 'border-slate-300'
+                      }`}
+                    />
+                    {errors.edificacao && (
+                      <p className="text-xs text-red-600 mt-1">{errors.edificacao}</p>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-5">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      CNPJ / CPF do Requerente
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={32}
+                      value={requerenteCpfCnpj}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRequerenteCpfCnpj(val);
+                        if (repetirRequerente) {
+                          setProprietarioDoc(val);
+                        }
+                      }}
+                      onBlur={() => {
+                        const trimmed = requerenteCpfCnpj.trim();
+                        if (trimmed) {
+                          const formatted = formatCpfCnpj(trimmed);
+                          if (formatted && formatted !== '-') {
+                            setRequerenteCpfCnpj(formatted);
+                            if (repetirRequerente) {
+                              setProprietarioDoc(formatted);
+                            }
+                          }
+                        }
+                      }}
+                      placeholder="00.000.000/0000-00"
+                      className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-600/20 text-slate-900 font-mono"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="sm:col-span-4">
@@ -1068,41 +1150,93 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
           </div>
 
-          {/* Seção 3: Proprietário / Responsável */}
+          {/* Seção 3: Proprietário / Responsável Legal e Síndico */}
           <div>
-            <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-700">
-              <User className="w-4 h-4 text-purple-600" />
-              <span>3. Proprietário e Responsável Legal <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-3 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-700">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-purple-600" />
+                <span>3. Proprietário e Responsável Legal <span className="text-slate-400 font-normal lowercase">(opcional)</span></span>
+              </div>
+
+              <label className="inline-flex items-center gap-2 text-[11px] font-semibold normal-case tracking-normal text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-md cursor-pointer select-none transition-colors">
+                <input
+                  type="checkbox"
+                  checked={repetirRequerente}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setRepetirRequerente(checked);
+                    if (checked) {
+                      setProprietarioNome(requerente || edificacao);
+                      setProprietarioDoc(requerenteCpfCnpj);
+                    }
+                  }}
+                  className="w-3.5 h-3.5 rounded border-purple-300 text-purple-700 focus:ring-purple-500 cursor-pointer"
+                />
+                <span>Mesmo do Requerente (repetir Nome e CNPJ/CPF)</span>
+              </label>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div className="sm:col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <div className="sm:col-span-3">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Razão Social / Nome do Responsável
+                  Qualificação / Vínculo
+                </label>
+                <select
+                  value={proprietarioTipoVinculo}
+                  onChange={(e) => setProprietarioTipoVinculo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 text-slate-800 font-medium cursor-pointer"
+                >
+                  <option value="Proprietário / Responsável Legal">Proprietário / Resp. Legal</option>
+                  <option value="Proprietário">Proprietário</option>
+                  <option value="Responsável Legal">Responsável Legal</option>
+                  <option value="Síndico">Síndico</option>
+                  <option value="Administrador / Procurador">Administrador / Procurador</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-4">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nome / Razão Social
                 </label>
                 <input
                   type="text"
                   value={proprietarioNome}
-                  onChange={(e) => setProprietarioNome(e.target.value)}
-                  placeholder="Nome do Síndico, Proprietário ou Razão Social"
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600"
+                  onChange={(e) => {
+                    setProprietarioNome(e.target.value);
+                    if (repetirRequerente) setRepetirRequerente(false);
+                  }}
+                  placeholder="Nome do Proprietário, Resp. Legal ou Síndico"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 uppercase"
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   CNPJ ou CPF
                 </label>
                 <input
                   type="text"
+                  maxLength={32}
                   value={proprietarioDoc}
-                  onChange={(e) => setProprietarioDoc(e.target.value)}
+                  onChange={(e) => {
+                    setProprietarioDoc(e.target.value);
+                    if (repetirRequerente) setRepetirRequerente(false);
+                  }}
+                  onBlur={() => {
+                    const trimmed = proprietarioDoc.trim();
+                    if (trimmed) {
+                      const formatted = formatCpfCnpj(trimmed);
+                      if (formatted && formatted !== '-') {
+                        setProprietarioDoc(formatted);
+                      }
+                    }
+                  }}
                   placeholder="00.000.000/0000-00"
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600 font-mono"
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-3">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Telefone / WhatsApp
                 </label>
@@ -1113,6 +1247,72 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   placeholder="(24) 3365-0000"
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-600"
                 />
+              </div>
+            </div>
+
+            <div className="mt-3 p-3 rounded-lg bg-purple-50/40 border border-purple-200/70">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-purple-900 mb-2">
+                Síndico / Contato Complementar <span className="text-slate-500 font-normal lowercase">(opcional — útil quando o requerente é condomínio ou empresa)</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                <div className="sm:col-span-5">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Nome do Síndico / Representante
+                  </label>
+                  <input
+                    type="text"
+                    value={sindicoNome}
+                    onChange={(e) => setSindicoNome(e.target.value)}
+                    placeholder="Nome completo do Síndico ou Responsável"
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600 uppercase"
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    CPF do Síndico
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={32}
+                    value={sindicoCpf}
+                    onChange={(e) => setSindicoCpf(e.target.value)}
+                    onBlur={() => {
+                      const trimmed = sindicoCpf.trim();
+                      if (trimmed) {
+                        const formatted = formatCpfCnpj(trimmed);
+                        if (formatted && formatted !== '-') {
+                          setSindicoCpf(formatted);
+                        }
+                      }
+                    }}
+                    placeholder="000.000.000-00"
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600 font-mono"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Telefone Síndico
+                  </label>
+                  <input
+                    type="text"
+                    value={sindicoTelefone}
+                    onChange={(e) => setSindicoTelefone(e.target.value)}
+                    placeholder="(24) 99999-0000"
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    E-mail
+                  </label>
+                  <input
+                    type="email"
+                    value={proprietarioEmail}
+                    onChange={(e) => setProprietarioEmail(e.target.value)}
+                    placeholder="contato@email.com"
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-600"
+                  />
+                </div>
               </div>
             </div>
           </div>

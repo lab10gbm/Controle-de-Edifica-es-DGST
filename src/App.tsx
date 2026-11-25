@@ -559,22 +559,29 @@ export default function App() {
           const matchLogradouro = item.endereco.logradouro.toLowerCase().includes(term);
           const matchBairro = item.endereco.bairro.toLowerCase().includes(term);
           const matchMunicipio = item.endereco.municipio.toLowerCase().includes(term);
-          const matchProprietario = item.proprietario.nomeOuRazaoSocial.toLowerCase().includes(term);
+          const matchProprietario =
+            item.proprietario.nomeOuRazaoSocial.toLowerCase().includes(term) ||
+            (item.proprietario.sindicoNome || '').toLowerCase().includes(term);
           const matchFiscal = item.fiscalResponsavel.toLowerCase().includes(term);
 
-          const rawCpfCnpj = (item.proprietario?.cpfOuCnpj || '').trim();
-          const cleanItemCpfCnpj = rawCpfCnpj.replace(/[^\d]/g, '');
-          const formattedCpfCnpj = formatCpfCnpj(rawCpfCnpj).toLowerCase();
+          const docCandidates = [
+            item.requerenteCpfCnpj || '',
+            item.proprietario?.cpfOuCnpj || '',
+            item.proprietario?.sindicoCpf || '',
+          ]
+            .map((v) => v.trim())
+            .filter(Boolean);
 
-          const matchCpfText =
-            rawCpfCnpj.toLowerCase().includes(term) || formattedCpfCnpj.includes(term);
-
-          const matchCpfDigits =
-            termDigits.length >= 3 && cleanItemCpfCnpj.length >= 3
-              ? cleanItemCpfCnpj.includes(termDigits)
-              : termDigits.length > 0 && cleanItemCpfCnpj.length > 0 && cleanItemCpfCnpj === termDigits;
-
-          const matchCpfCnpj = matchCpfText || matchCpfDigits;
+          const matchCpfCnpj = docCandidates.some((rawDoc) => {
+            const cleanDoc = rawDoc.replace(/[^\d]/g, '');
+            const formattedDoc = formatCpfCnpj(rawDoc).toLowerCase();
+            const matchText = rawDoc.toLowerCase().includes(term) || formattedDoc.includes(term);
+            const matchDigits =
+              termDigits.length >= 3 && cleanDoc.length >= 3
+                ? cleanDoc.includes(termDigits)
+                : termDigits.length > 0 && cleanDoc.length > 0 && cleanDoc === termDigits;
+            return matchText || matchDigits;
+          });
 
           const reqDigits = (item.requerente || '').replace(/[^\d]/g, '');
           const matchReqDigits = termDigits.length >= 6 && reqDigits.includes(termDigits);

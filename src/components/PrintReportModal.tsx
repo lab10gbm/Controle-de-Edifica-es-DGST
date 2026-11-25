@@ -104,8 +104,12 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-slate-500">Razão Social / Nome:</span>{' '}
-                    <strong className="text-slate-900 block mt-0.5">{singleRecord.edificacao}</strong>
+                    <span className="text-slate-500">Requerente (Nome / Razão Social):</span>{' '}
+                    <strong className="text-slate-900 block mt-0.5">{singleRecord.requerente || singleRecord.edificacao}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">CNPJ / CPF do Requerente:</span>{' '}
+                    <strong className="font-mono text-slate-900 block mt-0.5">{singleRecord.requerenteCpfCnpj || singleRecord.proprietario?.cpfOuCnpj || 'Não informado'}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Unidade Responsável (OBM):</span>{' '}
@@ -128,15 +132,15 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                 </div>
               </div>
 
-              {/* Proprietário e Responsável Legal */}
+              {/* Proprietário e Responsável Legal / Síndico */}
               <div className="border border-slate-300 rounded-lg p-4 space-y-2">
                 <h3 className="text-xs font-bold uppercase text-slate-700 border-b pb-1">
-                  2. Proprietário / Responsável Notificado
+                  2. {singleRecord.proprietario.tipoVinculo || 'Proprietário / Responsável Notificado'}
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                   <div>
                     <span className="text-slate-500">Nome / Razão Social:</span>{' '}
-                    <strong className="text-slate-900 block mt-0.5">{singleRecord.proprietario.nomeOuRazaoSocial}</strong>
+                    <strong className="text-slate-900 block mt-0.5">{singleRecord.proprietario.nomeOuRazaoSocial || 'Não informado'}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500">CPF / CNPJ:</span>{' '}
@@ -146,6 +150,22 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     <span className="text-slate-500">Contato:</span>{' '}
                     <span className="text-slate-800 block mt-0.5">{singleRecord.proprietario.telefone || '—'} {singleRecord.proprietario.email ? `· ${singleRecord.proprietario.email}` : ''}</span>
                   </div>
+                  {(singleRecord.proprietario.sindicoNome || singleRecord.proprietario.sindicoCpf || singleRecord.proprietario.sindicoTelefone) && (
+                    <div className="sm:col-span-3 pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <span className="text-slate-500">Síndico / Representante:</span>{' '}
+                        <strong className="text-slate-900 block mt-0.5">{singleRecord.proprietario.sindicoNome || 'Não informado'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">CPF do Síndico:</span>{' '}
+                        <span className="font-mono text-slate-800 block mt-0.5">{singleRecord.proprietario.sindicoCpf || 'Não informado'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Telefone Síndico:</span>{' '}
+                        <span className="text-slate-800 block mt-0.5">{singleRecord.proprietario.sindicoTelefone || '—'}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

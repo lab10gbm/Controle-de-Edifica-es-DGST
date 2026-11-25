@@ -123,6 +123,11 @@
           "maxLength": 300,
           "description": "Nome do requerente."
         },
+        "requerenteCpfCnpj": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "CPF ou CNPJ do requerente."
+        },
         "tipoProcesso": {
           "type": "string",
           "maxLength": 120,

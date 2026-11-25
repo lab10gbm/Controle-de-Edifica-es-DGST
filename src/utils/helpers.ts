@@ -714,6 +714,7 @@ export function exportToCSV(items: BuildingNotification[], filename = 'processos
   const headers = [
     'PROCESSO',
     'REQUERENTE',
+    'CNPJ/CPF REQUERENTE',
     'TIPO',
     'ORIGEM',
     'DATA DE ENTRADA',
@@ -729,7 +730,10 @@ export function exportToCSV(items: BuildingNotification[], filename = 'processos
     'BAIRRO',
     'MUNICÍPIO',
     'RESPONSÁVEL',
-    'CPF/CNPJ',
+    'VÍNCULO',
+    'CPF/CNPJ RESPONSÁVEL',
+    'SÍNDICO',
+    'CPF SÍNDICO',
     'EXIGÊNCIAS',
   ];
 
@@ -738,6 +742,7 @@ export function exportToCSV(items: BuildingNotification[], filename = 'processos
     return [
       `"${formatProcesso(item.processo !== undefined ? item.processo : item.numero, { codigo: item.detalhesSST?.codigo, ano: item.anoExercicio })}"`,
       `"${(item.requerente || item.edificacao).replace(/"/g, '""')}"`,
+      `"${(item.requerenteCpfCnpj || item.proprietario.cpfOuCnpj || '').replace(/"/g, '""')}"`,
       `"${(item.tipoProcesso || item.tipoDocumento || 'Processo').replace(/"/g, '""')}"`,
       `"${(item.origem || item.obm).replace(/"/g, '""')}"`,
       `"${prazo.dataEntradaBR}"`,
@@ -753,7 +758,10 @@ export function exportToCSV(items: BuildingNotification[], filename = 'processos
       `"${item.endereco.bairro}"`,
       `"${item.endereco.municipio}"`,
       `"${item.proprietario.nomeOuRazaoSocial.replace(/"/g, '""')}"`,
+      `"${(item.proprietario.tipoVinculo || '').replace(/"/g, '""')}"`,
       `"${item.proprietario.cpfOuCnpj}"`,
+      `"${(item.proprietario.sindicoNome || '').replace(/"/g, '""')}"`,
+      `"${(item.proprietario.sindicoCpf || '').replace(/"/g, '""')}"`,
       `"${item.exigencias.join('; ').replace(/"/g, '""')}"`,
     ];
   });

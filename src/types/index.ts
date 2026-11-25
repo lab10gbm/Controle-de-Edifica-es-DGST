@@ -85,6 +85,7 @@ export interface BuildingNotification {
   codigoDocumento: string; // Ex: NOT-10GBM-2026/001
   edificacao: string; // REQUERENTE / Edificação
   requerente?: string; // REQUERENTE
+  requerenteCpfCnpj?: string; // CPF ou CNPJ do Requerente
   tipoProcesso?: string; // TIPO (ex: Certificado de Aprovação, Notificação, Auto de Vistoria)
   origem?: string; // ORIGEM (ex: ANGRA DOS REIS, SST 10º GBM)
   status: StatusType;
@@ -110,12 +111,16 @@ export interface BuildingNotification {
     pontoReferencia?: string;
   };
 
-  // Responsável / Proprietário
+  // Responsável / Proprietário / Síndico
   proprietario: {
     nomeOuRazaoSocial: string;
     cpfOuCnpj: string;
     telefone: string;
     email: string;
+    tipoVinculo?: string;
+    sindicoNome?: string;
+    sindicoCpf?: string;
+    sindicoTelefone?: string;
   };
 
   // Fiscal e Tramitação

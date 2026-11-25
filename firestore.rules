@@ -117,11 +117,18 @@ service cloud.firestore {
     function isValidProprietarioMap(prop) {
       return prop is map
         && prop.keys().hasAll(['nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email'])
-        && prop.keys().hasOnly(['nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email'])
+        && prop.keys().hasOnly([
+          'nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email',
+          'tipoVinculo', 'sindicoNome', 'sindicoCpf', 'sindicoTelefone'
+        ])
         && prop.nomeOuRazaoSocial is string && prop.nomeOuRazaoSocial.size() <= 300
         && prop.cpfOuCnpj is string && prop.cpfOuCnpj.size() <= 32
         && prop.telefone is string && prop.telefone.size() <= 40
-        && prop.email is string && prop.email.size() <= 200;
+        && prop.email is string && prop.email.size() <= 200
+        && (!('tipoVinculo' in prop) || (prop.tipoVinculo is string && prop.tipoVinculo.size() <= 60))
+        && (!('sindicoNome' in prop) || (prop.sindicoNome is string && prop.sindicoNome.size() <= 300))
+        && (!('sindicoCpf' in prop) || (prop.sindicoCpf is string && prop.sindicoCpf.size() <= 32))
+        && (!('sindicoTelefone' in prop) || (prop.sindicoTelefone is string && prop.sindicoTelefone.size() <= 40));
     }
 
     function isValidDetalhesSSTMap(det) {
@@ -147,10 +154,17 @@ service cloud.firestore {
     }
 
     function isValidNotification(data, userId, yearId, notificationId) {
-      return data.keys().size() == 31
-        && data.keys().hasOnly([
+      return data.keys().hasAll([
           'id', 'ownerUid', 'anoExercicio', 'numero', 'processo', 'codigoDocumento',
           'edificacao', 'requerente', 'tipoProcesso', 'origem', 'status', 'tipoDocumento',
+          'obm', 'dataExpedicao', 'dataEntrada', 'dataValidade', 'dataTramite', 'oculto',
+          'detalhesSST', 'endereco', 'proprietario', 'fiscalResponsavel', 'matriculaFiscal',
+          'processoAdministrativo', 'exigencias', 'observacoes', 'historico',
+          'criadoEm', 'atualizadoEm', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'anoExercicio', 'numero', 'processo', 'codigoDocumento',
+          'edificacao', 'requerente', 'requerenteCpfCnpj', 'tipoProcesso', 'origem', 'status', 'tipoDocumento',
           'obm', 'dataExpedicao', 'dataEntrada', 'dataValidade', 'dataTramite', 'oculto',
           'detalhesSST', 'endereco', 'proprietario', 'fiscalResponsavel', 'matriculaFiscal',
           'processoAdministrativo', 'exigencias', 'observacoes', 'historico',
@@ -166,6 +180,7 @@ service cloud.firestore {
         && data.codigoDocumento is string && data.codigoDocumento.size() <= 120
         && data.edificacao is string && data.edificacao.size() <= 300
         && data.requerente is string && data.requerente.size() <= 300
+        && (!('requerenteCpfCnpj' in data) || (data.requerenteCpfCnpj is string && data.requerenteCpfCnpj.size() <= 32))
         && data.tipoProcesso is string && data.tipoProcesso.size() <= 120
         && data.origem is string && data.origem.size() <= 160
         && data.status is string && data.status.size() <= 120
@@ -387,7 +402,7 @@ service cloud.firestore {
                   || incoming().diff(existing()).affectedKeys().hasOnly(['historico', 'detalhesSST', 'atualizadoEm', 'updatedAt'])
                   || incoming().diff(existing()).affectedKeys().hasOnly([
                     'numero', 'processo', 'codigoDocumento', 'edificacao', 'requerente',
-                    'tipoProcesso', 'origem', 'status', 'tipoDocumento', 'obm',
+                    'requerenteCpfCnpj', 'tipoProcesso', 'origem', 'status', 'tipoDocumento', 'obm',
                     'dataExpedicao', 'dataEntrada', 'dataValidade', 'dataTramite',
                     'oculto', 'detalhesSST', 'endereco', 'proprietario',
                     'fiscalResponsavel', 'matriculaFiscal', 'processoAdministrativo',

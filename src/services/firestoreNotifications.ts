@@ -214,12 +214,17 @@ function sanitizeProprietario(
     telefone: '',
     email: '',
   };
-  return {
+  const result: Record<string, string> = {
     nomeOuRazaoSocial: clampStr(prop.nomeOuRazaoSocial, 300),
     cpfOuCnpj: clampStr(prop.cpfOuCnpj, 32),
     telefone: clampStr(prop.telefone, 40),
     email: clampStr(prop.email, 200),
   };
+  if (prop.tipoVinculo) result.tipoVinculo = clampStr(prop.tipoVinculo, 60);
+  if (prop.sindicoNome) result.sindicoNome = clampStr(prop.sindicoNome, 300);
+  if (prop.sindicoCpf) result.sindicoCpf = clampStr(prop.sindicoCpf, 32);
+  if (prop.sindicoTelefone) result.sindicoTelefone = clampStr(prop.sindicoTelefone, 40);
+  return result;
 }
 
 function sanitizeExigencias(raw?: string[]): string[] {
@@ -259,6 +264,7 @@ function buildUpdatableNotificationFields(
     codigoDocumento: clampStr(record.codigoDocumento || 'S/N', 120),
     edificacao: clampStr(record.edificacao || record.requerente || '', 300),
     requerente: clampStr(record.requerente || record.edificacao || '', 300),
+    requerenteCpfCnpj: clampStr(record.requerenteCpfCnpj || '', 32),
     tipoProcesso: clampStr(record.tipoProcesso || '', 120),
     origem: clampStr(record.origem || '', 160),
     status: clampStr(record.status || 'EM ANÁLISE', 120),
@@ -292,6 +298,7 @@ function fromFirestoreDoc(data: Record<string, any>, docId: string, yearId: stri
     codigoDocumento: data.codigoDocumento || 'S/N',
     edificacao: data.edificacao || '',
     requerente: data.requerente || data.edificacao || '',
+    requerenteCpfCnpj: data.requerenteCpfCnpj || '',
     tipoProcesso: data.tipoProcesso || '',
     origem: data.origem || '',
     status: data.status || 'EM ANÁLISE',
