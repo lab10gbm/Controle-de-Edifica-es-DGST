@@ -11,8 +11,6 @@ import {
   Activity,
   ArrowUpDown,
   UploadCloud,
-  Trash2,
-  BarChart3,
   RefreshCw,
   MapPin
 } from 'lucide-react';
@@ -29,10 +27,7 @@ interface FilterBarProps {
   onOpenPrintModal: () => void;
   onExportCSV: () => void;
   totalFilteredCount: number;
-  totalRecords?: number;
   locationOptions?: string[];
-  onClearAllData?: () => void;
-  onOpenReports?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -45,10 +40,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onOpenPrintModal,
   onExportCSV,
   totalFilteredCount,
-  totalRecords,
   locationOptions,
-  onClearAllData,
-  onOpenReports,
 }) => {
   const effectiveLocations = locationOptions && locationOptions.length > 0 ? locationOptions : LOCALIZACAO_LIST;
   const handleInputChange = (field: keyof FilterState, value: any) => {
@@ -143,30 +135,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               <Printer className="w-3.5 h-3.5 text-slate-500" />
               <span className="hidden sm:inline">Imprimir</span>
             </button>
-
-            {onOpenReports && (
-              <button
-                type="button"
-                onClick={onOpenReports}
-                title="Abrir gráficos e relatórios trimestrais, quadrimestrais e semestrais"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <BarChart3 className="w-4 h-4 text-blue-700" />
-                <span>Gráficos / Relatórios</span>
-              </button>
-            )}
-
-            {onClearAllData && (totalRecords !== undefined ? totalRecords > 0 : totalFilteredCount > 0) && (
-              <button
-                type="button"
-                onClick={onClearAllData}
-                title="Limpar todos os registros da plataforma (Zerar base de dados)"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100/90 active:bg-rose-200 border border-rose-200 rounded-lg shadow-2xs transition-colors cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                <span className="hidden sm:inline">Limpar Tudo</span>
-              </button>
-            )}
           </div>
         </div>
       </div>

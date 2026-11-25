@@ -1236,10 +1236,7 @@ export default function App() {
               onOpenPrintModal={handleOpenPrintReport}
               onExportCSV={handleExportCSV}
               totalFilteredCount={filteredNotifications.length}
-              totalRecords={notifications.length}
               locationOptions={availableLocations}
-              onClearAllData={handleClearAllData}
-              onOpenReports={() => setActiveView('relatorios')}
             />
 
             {/* Data Table with Expandable Rows */}
