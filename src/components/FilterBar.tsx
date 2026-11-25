@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   Search, 
   PlusCircle, 
@@ -12,7 +12,10 @@ import {
   ArrowUpDown,
   UploadCloud,
   RefreshCw,
-  MapPin
+  MapPin,
+  ChevronDown,
+  ChevronUp,
+  FileSpreadsheet
 } from 'lucide-react';
 import { FilterState, ExpirationFilter } from '../types';
 import { LOCALIZACAO_LIST, OBM_LIST, STATUS_LIST } from '../data/initialData';
@@ -42,15 +45,38 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   totalFilteredCount,
   locationOptions,
 }) => {
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isActionsMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
+        setIsActionsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsActionsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isActionsMenuOpen]);
+
   const effectiveLocations = locationOptions && locationOptions.length > 0 ? locationOptions : LOCALIZACAO_LIST;
   const handleInputChange = (field: keyof FilterState, value: any) => {
     setFilters((prev) => ({ ...prev, [field]: value }));
   };
 
   return (
-    <div className="bg-white border border-slate-200/90 rounded-xl shadow-xs overflow-hidden">
+    <div className="bg-white border border-slate-200/90 rounded-xl shadow-xs">
       {/* Top Filter Bar Section */}
-      <div className="p-4 sm:p-5 border-b border-slate-100 bg-linear-to-r from-slate-50/70 to-white">
+      <div className="p-4 sm:p-5 border-b border-slate-100 bg-linear-to-r from-slate-50/70 to-white rounded-t-xl">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           {/* Global Search Bar */}
           <div className="relative flex-1">
@@ -73,30 +99,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             )}
           </div>
 
-          {/* Action Buttons: Sincronizar DGST, Importar CSV, Novo Registro, Listar Todos, etc */}
+          {/* Action Buttons: Novo Registro, Listar Todos e Menu Unificado (Sincronizar DGST, Importar, Exportar, Imprimir) */}
           <div className="flex items-center gap-2 flex-wrap">
-            {onOpenDgstSyncModal && (
-              <button
-                type="button"
-                onClick={onOpenDgstSyncModal}
-                title="Correlacionar Relatório DGST (E27/PROC/COD/ANO e Datas do Pronto) e empurrar para o Firestore"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100/90 active:bg-indigo-200 border border-indigo-300 rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <RefreshCw className="w-4 h-4 text-indigo-700" />
-                <span>Sincronizar DGST / Prontos</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={onOpenImportModal}
-              title="Importar dados de planilha do Google Sheets (.CSV)"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100/90 active:bg-emerald-200 border border-emerald-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
-            >
-              <UploadCloud className="w-4 h-4 text-emerald-700" />
-              <span>Importar CSV</span>
-            </button>
-
             <button
               type="button"
               onClick={onOpenNewRecordModal}
@@ -116,31 +120,115 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               <span>Listar Todos</span>
             </button>
 
-            <button
-              type="button"
-              onClick={onExportCSV}
-              title="Exportar planilha CSV da lista atual"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
-            >
-              <FileDown className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden sm:inline">Exportar</span>
-            </button>
+            <div className="relative" ref={actionsMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsActionsMenuOpen((prev) => !prev)}
+                aria-expanded={isActionsMenuOpen}
+                aria-haspopup="menu"
+                title="Sincronizar DGST / Prontos, Importar CSV, Exportar CSV e Imprimir"
+                className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold border rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  isActionsMenuOpen
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-300'
+                }`}
+              >
+                <FileSpreadsheet className={`w-4 h-4 ${isActionsMenuOpen ? 'text-white' : 'text-indigo-700'}`} />
+                <span>Planilhas &amp; Impressão</span>
+                {isActionsMenuOpen ? (
+                  <ChevronUp className="w-4 h-4 opacity-80" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 opacity-80" />
+                )}
+              </button>
 
-            <button
-              type="button"
-              onClick={onOpenPrintModal}
-              title="Gerar e imprimir relatório oficial"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden sm:inline">Imprimir</span>
-            </button>
+              {isActionsMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 mt-1.5 w-68 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-40"
+                >
+                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Importação e Cruzamento
+                  </div>
+                  {onOpenDgstSyncModal && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsActionsMenuOpen(false);
+                        onOpenDgstSyncModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-start gap-2.5 hover:bg-indigo-50/80 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4 text-indigo-700 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold text-indigo-950">Sincronizar DGST / Prontos</div>
+                        <div className="text-[11px] text-slate-500">Cruzar E27 e datas do Pronto</div>
+                      </div>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsActionsMenuOpen(false);
+                      onOpenImportModal();
+                    }}
+                    className="w-full px-3 py-2 text-left flex items-start gap-2.5 hover:bg-emerald-50/80 transition-colors cursor-pointer"
+                  >
+                    <UploadCloud className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold text-emerald-950">Importar CSV</div>
+                      <div className="text-[11px] text-slate-500">Planilha Google Sheets (.CSV)</div>
+                    </div>
+                  </button>
+
+                  <div className="my-1 border-t border-slate-100" />
+                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Saída e Relatórios
+                  </div>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsActionsMenuOpen(false);
+                      onExportCSV();
+                    }}
+                    className="w-full px-3 py-2 text-left flex items-start gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    <FileDown className="w-4 h-4 text-slate-700 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold text-slate-800">Exportar CSV</div>
+                      <div className="text-[11px] text-slate-500">Baixar lista com filtros atuais</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsActionsMenuOpen(false);
+                      onOpenPrintModal();
+                    }}
+                    className="w-full px-3 py-2 text-left flex items-start gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-700 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold text-slate-800">Imprimir</div>
+                      <div className="text-[11px] text-slate-500">Gerar e imprimir relatório oficial</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Structured Filters Controls Grid */}
-      <div className="p-4 sm:p-5 bg-white">
+      <div className="p-4 sm:p-5 bg-white rounded-b-xl">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           {/* Período: Data Inicial */}
           <div>
