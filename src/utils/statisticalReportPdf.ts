@@ -1,4 +1,3 @@
-import { jsPDF } from 'jspdf';
 import {
   GenericStatisticalMatrixResult,
   MONTH_ABBR,
@@ -141,6 +140,8 @@ export async function generateStatisticalPdfReport({
     showSignature: options?.showSignature ?? false,
     pageBreakBetween: options?.pageBreakBetween ?? false,
   };
+
+  const { jsPDF } = await import('jspdf');
 
   const doc = new jsPDF({
     orientation: opts.orientation,

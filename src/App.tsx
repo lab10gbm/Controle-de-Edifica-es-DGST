@@ -1,15 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Unsubscribe } from 'firebase/firestore';
 import { BuildingNotification, FilterState } from './types';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { NotificationTable } from './components/NotificationTable';
-import { RecordModal } from './components/RecordModal';
-import { PrintReportModal } from './components/PrintReportModal';
-import { ImportCsvModal } from './components/ImportCsvModal';
-import { DgstSyncModal } from './components/DgstSyncModal';
-import { StatisticalReportDashboard } from './components/StatisticalReportDashboard';
 import { AuthGate } from './components/AuthGate';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { LOCALIZACAO_LIST } from './data/initialData';
@@ -46,8 +41,6 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import { FiscalizacaoRecord } from './types/fiscalizacao';
-import { FiscalizacoesWorkspace } from './components/fiscalizacao/FiscalizacoesWorkspace';
-import { FiscalizacaoStatisticalDashboard } from './components/fiscalizacao/FiscalizacaoStatisticalDashboard';
 import {
   batchImportFiscalizacoesToFirestore,
   clearAllFiscalizacoesInFirestore,
@@ -55,6 +48,41 @@ import {
   saveFiscalizacaoToFirestore,
   subscribeToFiscalizacoes,
 } from './services/firestoreFiscalizacoes';
+
+const RecordModal = lazy(() =>
+  import('./components/RecordModal').then((m) => ({ default: m.RecordModal }))
+);
+const PrintReportModal = lazy(() =>
+  import('./components/PrintReportModal').then((m) => ({ default: m.PrintReportModal }))
+);
+const ImportCsvModal = lazy(() =>
+  import('./components/ImportCsvModal').then((m) => ({ default: m.ImportCsvModal }))
+);
+const DgstSyncModal = lazy(() =>
+  import('./components/DgstSyncModal').then((m) => ({ default: m.DgstSyncModal }))
+);
+const StatisticalReportDashboard = lazy(() =>
+  import('./components/StatisticalReportDashboard').then((m) => ({
+    default: m.StatisticalReportDashboard,
+  }))
+);
+const FiscalizacoesWorkspace = lazy(() =>
+  import('./components/fiscalizacao/FiscalizacoesWorkspace').then((m) => ({
+    default: m.FiscalizacoesWorkspace,
+  }))
+);
+const FiscalizacaoStatisticalDashboard = lazy(() =>
+  import('./components/fiscalizacao/FiscalizacaoStatisticalDashboard').then((m) => ({
+    default: m.FiscalizacaoStatisticalDashboard,
+  }))
+);
+
+const LazySectionFallback = (
+  <div className="bg-white border border-slate-200 rounded-xl p-10 flex items-center justify-center gap-2.5 text-sm text-slate-600 shadow-xs">
+    <Loader2 className="w-4 h-4 animate-spin text-red-700" />
+    <span>Carregando módulo...</span>
+  </div>
+);
 
 const STORAGE_KEY = 'cbmerj_sst_notificacoes_v8_clean';
 
@@ -1358,87 +1386,93 @@ export default function App() {
             </div>
 
             {reportModality === 'processos' ? (
-              <StatisticalReportDashboard
-                notifications={notifications}
-                selectedYear={selectedYear}
-                availableYears={availableYears}
-                onEditRecord={handleEdit}
-              />
+              <Suspense fallback={LazySectionFallback}>
+                <StatisticalReportDashboard
+                  notifications={notifications}
+                  selectedYear={selectedYear}
+                  availableYears={availableYears}
+                  onEditRecord={handleEdit}
+                />
+              </Suspense>
             ) : (
-              <FiscalizacaoStatisticalDashboard
-                records={fiscalizacoes}
-                isLoading={isFiscalizacoesLoading}
-                onOpenFiscalizacoesTab={() => setActiveView('notificacoes')}
-                onSaveRecord={async (rec, isEditing) => {
-                  if (!user) return;
-                  try {
-                    await saveFiscalizacaoToFirestore(user.uid, rec, isEditing);
-                    addToast(
-                      'success',
-                      isEditing ? 'Fiscalização atualizada!' : 'Fiscalização cadastrada!',
-                      `Registro #${String(rec.codigo).padStart(4, '0')} (${rec.edificacao}) salvo no Firestore.`
-                    );
-                  } catch (err) {
-                    setFatalError(err instanceof Error ? err : new Error(String(err)));
-                  }
-                }}
-              />
+              <Suspense fallback={LazySectionFallback}>
+                <FiscalizacaoStatisticalDashboard
+                  records={fiscalizacoes}
+                  isLoading={isFiscalizacoesLoading}
+                  onOpenFiscalizacoesTab={() => setActiveView('notificacoes')}
+                  onSaveRecord={async (rec, isEditing) => {
+                    if (!user) return;
+                    try {
+                      await saveFiscalizacaoToFirestore(user.uid, rec, isEditing);
+                      addToast(
+                        'success',
+                        isEditing ? 'Fiscalização atualizada!' : 'Fiscalização cadastrada!',
+                        `Registro #${String(rec.codigo).padStart(4, '0')} (${rec.edificacao}) salvo no Firestore.`
+                      );
+                    } catch (err) {
+                      setFatalError(err instanceof Error ? err : new Error(String(err)));
+                    }
+                  }}
+                />
+              </Suspense>
             )}
           </div>
         ) : (
-          <FiscalizacoesWorkspace
-            records={fiscalizacoes}
-            isLoading={isFiscalizacoesLoading}
-            selectedYear={fiscalizacaoYear}
-            onSelectYear={setFiscalizacaoYear}
-            onSaveRecord={async (rec, isEditing) => {
-              if (!user) return;
-              try {
-                await saveFiscalizacaoToFirestore(user.uid, rec, isEditing);
-                addToast(
-                  'success',
-                  isEditing ? 'Notificação atualizada!' : 'Notificação cadastrada!',
-                  `Registro #${String(rec.codigo).padStart(4, '0')} (${rec.edificacao}) salvo no Firestore.`
-                );
-              } catch (err) {
-                setFatalError(err instanceof Error ? err : new Error(String(err)));
-              }
-            }}
-            onDeleteRecord={async (recId) => {
-              if (!user) return;
-              try {
-                await deleteFiscalizacaoFromFirestore(user.uid, recId);
-              } catch (err) {
-                setFatalError(err instanceof Error ? err : new Error(String(err)));
-              }
-            }}
-            onBatchImport={async (items, replaceExisting, onProgress) => {
-              if (!user) return 0;
-              try {
-                const existingIds = new Set(fiscalizacoes.map((f) => f.id));
-                return await batchImportFiscalizacoesToFirestore(
-                  user.uid,
-                  items,
-                  replaceExisting,
-                  existingIds,
-                  onProgress
-                );
-              } catch (err) {
-                setFatalError(err instanceof Error ? err : new Error(String(err)));
-                return 0;
-              }
-            }}
-            onClearAll={async () => {
-              if (!user) return 0;
-              try {
-                return await clearAllFiscalizacoesInFirestore(user.uid);
-              } catch (err) {
-                setFatalError(err instanceof Error ? err : new Error(String(err)));
-                return 0;
-              }
-            }}
-            onNotify={addToast}
-          />
+          <Suspense fallback={LazySectionFallback}>
+            <FiscalizacoesWorkspace
+              records={fiscalizacoes}
+              isLoading={isFiscalizacoesLoading}
+              selectedYear={fiscalizacaoYear}
+              onSelectYear={setFiscalizacaoYear}
+              onSaveRecord={async (rec, isEditing) => {
+                if (!user) return;
+                try {
+                  await saveFiscalizacaoToFirestore(user.uid, rec, isEditing);
+                  addToast(
+                    'success',
+                    isEditing ? 'Notificação atualizada!' : 'Notificação cadastrada!',
+                    `Registro #${String(rec.codigo).padStart(4, '0')} (${rec.edificacao}) salvo no Firestore.`
+                  );
+                } catch (err) {
+                  setFatalError(err instanceof Error ? err : new Error(String(err)));
+                }
+              }}
+              onDeleteRecord={async (recId) => {
+                if (!user) return;
+                try {
+                  await deleteFiscalizacaoFromFirestore(user.uid, recId);
+                } catch (err) {
+                  setFatalError(err instanceof Error ? err : new Error(String(err)));
+                }
+              }}
+              onBatchImport={async (items, replaceExisting, onProgress) => {
+                if (!user) return 0;
+                try {
+                  const existingIds = new Set(fiscalizacoes.map((f) => f.id));
+                  return await batchImportFiscalizacoesToFirestore(
+                    user.uid,
+                    items,
+                    replaceExisting,
+                    existingIds,
+                    onProgress
+                  );
+                } catch (err) {
+                  setFatalError(err instanceof Error ? err : new Error(String(err)));
+                  return 0;
+                }
+              }}
+              onClearAll={async () => {
+                if (!user) return 0;
+                try {
+                  return await clearAllFiscalizacoesInFirestore(user.uid);
+                } catch (err) {
+                  setFatalError(err instanceof Error ? err : new Error(String(err)));
+                  return 0;
+                }
+              }}
+              onNotify={addToast}
+            />
+          </Suspense>
         )}
       </main>
 
@@ -1459,53 +1493,61 @@ export default function App() {
 
       {/* Record Creation / Edition Modal */}
       {isRecordModalOpen && (
-        <RecordModal
-          isOpen={isRecordModalOpen}
-          onClose={() => setIsRecordModalOpen(false)}
-          onSave={handleSaveRecord}
-          editingRecord={editingRecord}
-          nextNumber={nextNumber}
-        />
+        <Suspense fallback={null}>
+          <RecordModal
+            isOpen={isRecordModalOpen}
+            onClose={() => setIsRecordModalOpen(false)}
+            onSave={handleSaveRecord}
+            editingRecord={editingRecord}
+            nextNumber={nextNumber}
+          />
+        </Suspense>
       )}
 
       {/* Import CSV Modal */}
       {isImportModalOpen && (
-        <ImportCsvModal
-          isOpen={isImportModalOpen}
-          onClose={() => setIsImportModalOpen(false)}
-          onImport={handleImportCsv}
-          onOpenDgstSyncWithText={(csvText, fileName) => {
-            setDgstSeedCsv({ text: csvText, fileName });
-            setIsDgstSyncModalOpen(true);
-          }}
-          currentCount={notifications.length}
-        />
+        <Suspense fallback={null}>
+          <ImportCsvModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            onImport={handleImportCsv}
+            onOpenDgstSyncWithText={(csvText, fileName) => {
+              setDgstSeedCsv({ text: csvText, fileName });
+              setIsDgstSyncModalOpen(true);
+            }}
+            currentCount={notifications.length}
+          />
+        </Suspense>
       )}
 
       {/* DGST Reconciliation & Push to Firestore Modal */}
       {isDgstSyncModalOpen && (
-        <DgstSyncModal
-          key={dgstSeedCsv ? dgstSeedCsv.fileName : 'dgst-default'}
-          isOpen={isDgstSyncModalOpen}
-          onClose={() => {
-            setIsDgstSyncModalOpen(false);
-            setDgstSeedCsv(null);
-          }}
-          existingNotifications={notifications}
-          initialCsvText={dgstSeedCsv?.text}
-          initialFileName={dgstSeedCsv?.fileName}
-          onSyncToFirestore={handleDgstSyncToFirestore}
-        />
+        <Suspense fallback={null}>
+          <DgstSyncModal
+            key={dgstSeedCsv ? dgstSeedCsv.fileName : 'dgst-default'}
+            isOpen={isDgstSyncModalOpen}
+            onClose={() => {
+              setIsDgstSyncModalOpen(false);
+              setDgstSeedCsv(null);
+            }}
+            existingNotifications={notifications}
+            initialCsvText={dgstSeedCsv?.text}
+            initialFileName={dgstSeedCsv?.fileName}
+            onSyncToFirestore={handleDgstSyncToFirestore}
+          />
+        </Suspense>
       )}
 
       {/* Print Document Modal */}
       {isPrintModalOpen && (
-        <PrintReportModal
-          isOpen={isPrintModalOpen}
-          onClose={() => setIsPrintModalOpen(false)}
-          singleRecord={singlePrintRecord}
-          recordsList={filteredNotifications}
-        />
+        <Suspense fallback={null}>
+          <PrintReportModal
+            isOpen={isPrintModalOpen}
+            onClose={() => setIsPrintModalOpen(false)}
+            singleRecord={singlePrintRecord}
+            recordsList={filteredNotifications}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Confirmação de Exclusão Total (compatível com iFrame, sem window.confirm) */}
