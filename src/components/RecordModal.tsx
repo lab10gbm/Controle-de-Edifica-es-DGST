@@ -150,7 +150,7 @@ function buildInitialModalState(
       numDocAntigo: '',
       processoSeguinte: '',
       showVinculosFields: false,
-      status: 'Notificação',
+      status: 'EM ANÁLISE',
       tipoDocumento: 'Notificação',
       obm: '10º GBM - ANGRA DOS REIS',
       dataExpedicao: hojeISO,
@@ -724,7 +724,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setNumDocAntigo('');
       setProcessoSeguinte('');
       setShowVinculosFields(false);
-      setStatus('Notificação');
+      setStatus('EM ANÁLISE');
       setTipoDocumento('Notificação');
       setObm('10º GBM - ANGRA DOS REIS');
       setDataExpedicao(hojeISO);
@@ -850,6 +850,10 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         ...(editingRecord?.detalhesSST || {}),
         codigo: finalCodigoSST,
         entradaSST: formatDateBR(dataExpedicao),
+        situacao:
+          !editingRecord || status !== editingRecord.status || !editingRecord.detalhesSST?.situacao
+            ? status
+            : editingRecord.detalhesSST.situacao,
         localizacao: localizacao.trim(),
         docGerado: docGerado.trim(),
         dataAoDiretor: dataAoDiretor.trim()
@@ -1446,6 +1450,9 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   onChange={(e) => setStatus(e.target.value as StatusType)}
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600/20 text-slate-800 font-bold cursor-pointer"
                 >
+                  {status && !STATUS_LIST.includes(status) && (
+                    <option value={status}>{status}</option>
+                  )}
                   {STATUS_LIST.map((st) => (
                     <option key={st} value={st}>
                       {st}
