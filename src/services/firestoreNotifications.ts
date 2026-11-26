@@ -119,6 +119,13 @@ function sanitizeBilhetesList(list?: BilheteItem[]): BilheteItem[] {
     if (b?.tipoDetalhe === 'BILHETE' || b?.tipoDetalhe === 'RETORNO') {
       item.tipoDetalhe = b.tipoDetalhe;
     }
+    if (b?.dataBilheteOrigem) {
+      const origem = clampStr(b.dataBilheteOrigem, 40);
+      if (origem) item.dataBilheteOrigem = origem;
+    }
+    if (typeof b?.autoContagemDias === 'boolean') {
+      item.autoContagemDias = b.autoContagemDias;
+    }
     return item;
   });
 }
@@ -290,9 +297,9 @@ function buildUpdatableNotificationFields(
 
 function fromFirestoreDoc(data: Record<string, any>, docId: string, yearId: string): BuildingNotification {
   return {
-    id: String(data.id || docId),
+    id: docId,
     ownerUid: data.ownerUid,
-    anoExercicio: String(data.anoExercicio || yearId),
+    anoExercicio: yearId,
     numero: typeof data.numero === 'number' ? data.numero : 0,
     processo: data.processo || undefined,
     codigoDocumento: data.codigoDocumento || 'S/N',
@@ -441,6 +448,371 @@ export function subscribeToNotificationsForYear(
   );
 }
 
+const ALLOWED_NOTIFICATION_KEYS = new Set([
+  'id',
+  'ownerUid',
+  'anoExercicio',
+  'numero',
+  'processo',
+  'codigoDocumento',
+  'edificacao',
+  'requerente',
+  'requerenteCpfCnpj',
+  'tipoProcesso',
+  'origem',
+  'status',
+  'tipoDocumento',
+  'obm',
+  'dataExpedicao',
+  'dataEntrada',
+  'dataValidade',
+  'dataTramite',
+  'oculto',
+  'detalhesSST',
+  'endereco',
+  'proprietario',
+  'fiscalResponsavel',
+  'matriculaFiscal',
+  'processoAdministrativo',
+  'exigencias',
+  'observacoes',
+  'historico',
+  'criadoEm',
+  'atualizadoEm',
+  'createdAt',
+  'updatedAt',
+]);
+
+const REQUIRED_NOTIFICATION_KEYS = [
+  'id',
+  'ownerUid',
+  'anoExercicio',
+  'numero',
+  'processo',
+  'codigoDocumento',
+  'edificacao',
+  'requerente',
+  'tipoProcesso',
+  'origem',
+  'status',
+  'tipoDocumento',
+  'obm',
+  'dataExpedicao',
+  'dataEntrada',
+  'dataValidade',
+  'dataTramite',
+  'oculto',
+  'detalhesSST',
+  'endereco',
+  'proprietario',
+  'fiscalResponsavel',
+  'matriculaFiscal',
+  'processoAdministrativo',
+  'exigencias',
+  'observacoes',
+  'historico',
+  'criadoEm',
+  'atualizadoEm',
+  'createdAt',
+  'updatedAt',
+];
+
+function isFirestoreTimestampLike(val: unknown): boolean {
+  return Boolean(
+    val &&
+      typeof val === 'object' &&
+      typeof (val as { toMillis?: unknown }).toMillis === 'function'
+  );
+}
+
+function hasLegacyNotificationSchemaMismatch(
+  existingData: Record<string, any>,
+  uid: string,
+  yearId: string,
+  docId: string
+): boolean {
+  if (existingData.id !== docId) return true;
+  if (existingData.ownerUid !== uid) return true;
+  if (existingData.anoExercicio !== yearId) return true;
+  if (typeof existingData.criadoEm !== 'string' || !existingData.criadoEm || existingData.criadoEm.length > 64) return true;
+  if (!isFirestoreTimestampLike(existingData.createdAt)) return true;
+
+  for (const reqKey of REQUIRED_NOTIFICATION_KEYS) {
+    if (!(reqKey in existingData)) return true;
+  }
+  for (const key of Object.keys(existingData)) {
+    if (!ALLOWED_NOTIFICATION_KEYS.has(key)) return true;
+  }
+  return false;
+}
+
+const ALLOWED_DETALHES_SST_KEYS = new Set([
+  'codigo', 'dataBase', 'entradaSST', 'entradaOBM', 'diasEntrada',
+  'processoAntigo', 'numDocAntigo', 'envioDirDivisao', 'diasEnvioDivisao',
+  'situacao', 'bilhetes', 'diasBilhetes', 'aoDiretor', 'dataAoDiretor',
+  'diasAoDiretor', 'grafico', 'docGerado', 'situacaoDocGerado',
+  'previsaoPronto', 'diasPrevisao', 'dataPronto', 'processoSeguinte',
+  'dataEntregue', 'diasEntrega', 'diasEmAtraso', 'diasNaSST', 'noGeral',
+  'localizacao', 'dataBilhete', 'diasBilhete', 'outrosBilhetes',
+  'ultimoBilhete', 'diasUltimoBilhete', 'listaBilhetes',
+]);
+
+const ALLOWED_ENDERECO_KEYS = new Set([
+  'logradouro', 'numero', 'complemento', 'bairro', 'municipio', 'cep', 'pontoReferencia',
+]);
+
+const ALLOWED_PROPRIETARIO_KEYS = new Set([
+  'nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email',
+  'tipoVinculo', 'sindicoNome', 'sindicoCpf', 'sindicoTelefone',
+]);
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return Boolean(val && typeof val === 'object' && !Array.isArray(val));
+}
+
+function findNotificationRuleViolations(
+  data: Record<string, unknown>,
+  uid: string,
+  yearId: string,
+  docId: string
+): string[] {
+  const violations: string[] = [];
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(uid)) violations.push('invalid_uid');
+  if (!/^[0-9]{4}$/.test(yearId)) violations.push('invalid_yearId');
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(docId)) violations.push('invalid_docId');
+
+  for (const reqKey of REQUIRED_NOTIFICATION_KEYS) {
+    if (reqKey === 'createdAt' || reqKey === 'updatedAt') continue;
+    if (!(reqKey in data)) violations.push(`missing:${reqKey}`);
+  }
+  for (const key of Object.keys(data)) {
+    if (!ALLOWED_NOTIFICATION_KEYS.has(key)) violations.push(`extra:${key}`);
+  }
+
+  if (data.id !== docId) violations.push('mismatch:id');
+  if (data.ownerUid !== uid) violations.push('mismatch:ownerUid');
+  if (data.anoExercicio !== yearId) violations.push('mismatch:anoExercicio');
+  if (typeof data.numero !== 'number' || !Number.isFinite(data.numero) || data.numero < 0) {
+    violations.push('invalid:numero');
+  }
+
+  const checkStr = (field: string, max: number) => {
+    const val = data[field];
+    if (typeof val !== 'string' || val.length > max) violations.push(`invalid:${field}`);
+  };
+  checkStr('processo', 64);
+  checkStr('codigoDocumento', 120);
+  checkStr('edificacao', 300);
+  checkStr('requerente', 300);
+  if ('requerenteCpfCnpj' in data && (typeof data.requerenteCpfCnpj !== 'string' || data.requerenteCpfCnpj.length > 32)) {
+    violations.push('invalid:requerenteCpfCnpj');
+  }
+  checkStr('tipoProcesso', 120);
+  checkStr('origem', 160);
+  checkStr('status', 120);
+  if (typeof data.tipoDocumento !== 'string' || !VALID_DOCUMENT_TYPES.includes(data.tipoDocumento as DocumentType)) {
+    violations.push('invalid:tipoDocumento');
+  }
+  checkStr('obm', 160);
+  checkStr('dataExpedicao', 40);
+  checkStr('dataEntrada', 40);
+  if (data.dataValidade !== null && (typeof data.dataValidade !== 'string' || data.dataValidade.length > 40)) {
+    violations.push('invalid:dataValidade');
+  }
+  if (data.dataTramite !== null && (typeof data.dataTramite !== 'string' || data.dataTramite.length > 40)) {
+    violations.push('invalid:dataTramite');
+  }
+  if (typeof data.oculto !== 'boolean') violations.push('invalid:oculto');
+  checkStr('fiscalResponsavel', 160);
+  checkStr('matriculaFiscal', 60);
+  checkStr('processoAdministrativo', 120);
+  checkStr('observacoes', 4000);
+  checkStr('criadoEm', 64);
+  checkStr('atualizadoEm', 64);
+
+  if (!isPlainObject(data.detalhesSST)) {
+    violations.push('invalid:detalhesSST');
+  } else {
+    const det = data.detalhesSST;
+    const detKeys = Object.keys(det);
+    if (detKeys.length > 34) violations.push('invalid:detalhesSST_size');
+    for (const k of detKeys) {
+      if (!ALLOWED_DETALHES_SST_KEYS.has(k)) violations.push(`invalid:detalhesSST_key:${k}`);
+    }
+    if ('situacao' in det && (typeof det.situacao !== 'string' || det.situacao.length > 120)) {
+      violations.push('invalid:detalhesSST.situacao');
+    }
+    if ('dataPronto' in det && (typeof det.dataPronto !== 'string' || det.dataPronto.length > 40)) {
+      violations.push('invalid:detalhesSST.dataPronto');
+    }
+    if ('listaBilhetes' in det) {
+      if (!Array.isArray(det.listaBilhetes) || det.listaBilhetes.length > 50) {
+        violations.push('invalid:detalhesSST.listaBilhetes');
+      } else if (det.listaBilhetes.length > 0 && !isPlainObject(det.listaBilhetes[0])) {
+        violations.push('invalid:detalhesSST.listaBilhetes[0]');
+      }
+    }
+  }
+
+  if (!isPlainObject(data.endereco)) {
+    violations.push('invalid:endereco');
+  } else {
+    const end = data.endereco;
+    for (const req of ['logradouro', 'numero', 'bairro', 'municipio']) {
+      if (!(req in end)) violations.push(`missing:endereco.${req}`);
+    }
+    for (const k of Object.keys(end)) {
+      if (!ALLOWED_ENDERECO_KEYS.has(k)) violations.push(`extra:endereco.${k}`);
+    }
+    const endLimits: Record<string, number> = {
+      logradouro: 240,
+      numero: 40,
+      complemento: 120,
+      bairro: 120,
+      municipio: 120,
+      cep: 20,
+      pontoReferencia: 200,
+    };
+    for (const [k, max] of Object.entries(endLimits)) {
+      if (k in end && (typeof end[k] !== 'string' || (end[k] as string).length > max)) {
+        violations.push(`invalid:endereco.${k}`);
+      }
+    }
+  }
+
+  if (!isPlainObject(data.proprietario)) {
+    violations.push('invalid:proprietario');
+  } else {
+    const prop = data.proprietario;
+    for (const req of ['nomeOuRazaoSocial', 'cpfOuCnpj', 'telefone', 'email']) {
+      if (!(req in prop)) violations.push(`missing:proprietario.${req}`);
+    }
+    for (const k of Object.keys(prop)) {
+      if (!ALLOWED_PROPRIETARIO_KEYS.has(k)) violations.push(`extra:proprietario.${k}`);
+    }
+    const propLimits: Record<string, number> = {
+      nomeOuRazaoSocial: 300,
+      cpfOuCnpj: 32,
+      telefone: 40,
+      email: 200,
+      tipoVinculo: 60,
+      sindicoNome: 300,
+      sindicoCpf: 32,
+      sindicoTelefone: 40,
+    };
+    for (const [k, max] of Object.entries(propLimits)) {
+      if (k in prop && (typeof prop[k] !== 'string' || (prop[k] as string).length > max)) {
+        violations.push(`invalid:proprietario.${k}`);
+      }
+    }
+  }
+
+  if (!Array.isArray(data.exigencias) || data.exigencias.length > 100) {
+    violations.push('invalid:exigencias');
+  } else if (data.exigencias.length > 0 && (typeof data.exigencias[0] !== 'string' || data.exigencias[0].length > 500)) {
+    violations.push('invalid:exigencias[0]');
+  }
+
+  if (!Array.isArray(data.historico) || data.historico.length > 150) {
+    violations.push('invalid:historico');
+  } else if (data.historico.length > 0 && !isPlainObject(data.historico[0])) {
+    violations.push('invalid:historico[0]');
+  }
+
+  return violations;
+}
+
+async function updateNotificationDocWithRepair(
+  uid: string,
+  yearId: string,
+  docId: string,
+  updatable: Record<string, unknown>,
+  fallbackRecord: BuildingNotification,
+  nowISO: string
+): Promise<void> {
+  const targetRef = doc(db, 'users', uid, 'years', yearId, 'notifications', docId);
+  try {
+    await updateDoc(targetRef, {
+      ...updatable,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    const msg = error instanceof Error ? error.message : String(error);
+    const isRecoverableRuleOrMissing =
+      code === 'permission-denied' ||
+      code === 'not-found' ||
+      msg.includes('Missing or insufficient permissions') ||
+      msg.includes('No document to update');
+
+    if (!isRecoverableRuleOrMissing) {
+      throw error;
+    }
+
+    const snap = await getDocFromServer(targetRef);
+    if (!snap.exists()) {
+      await setDoc(targetRef, {
+        ...updatable,
+        id: docId,
+        ownerUid: uid,
+        anoExercicio: yearId,
+        criadoEm: clampStr(fallbackRecord.criadoEm || nowISO, 64),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    }
+
+    const existingData = snap.data() as Record<string, any>;
+    const resolvedCriadoEm = clampStr(
+      (typeof existingData.criadoEm === 'string' && existingData.criadoEm) ||
+        fallbackRecord.criadoEm ||
+        nowISO,
+      64
+    );
+
+    const candidateDoc: Record<string, unknown> = {
+      ...updatable,
+      id: docId,
+      ownerUid: uid,
+      anoExercicio: yearId,
+      criadoEm: resolvedCriadoEm,
+    };
+
+    const violations = findNotificationRuleViolations(candidateDoc, uid, yearId, docId);
+    if (violations.length > 0) {
+      console.error('Firestore notification payload rule violations:', {
+        docId,
+        yearId,
+        violations,
+      });
+      throw error;
+    }
+
+    const legacyMismatch = hasLegacyNotificationSchemaMismatch(
+      existingData,
+      uid,
+      yearId,
+      docId
+    );
+    const isOwnedDoc = !existingData.ownerUid || existingData.ownerUid === uid;
+
+    if (legacyMismatch || isOwnedDoc) {
+      // Sequential delete + set avoids Firestore single-batch conflicts and
+      // any update-only resource mismatch while still enforcing allow delete + allow create rules.
+      await deleteDoc(targetRef);
+      await setDoc(targetRef, {
+        ...candidateDoc,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    }
+
+    throw error;
+  }
+}
+
 export async function saveNotificationToFirestore(
   uid: string,
   record: BuildingNotification,
@@ -461,24 +833,25 @@ export async function saveNotificationToFirestore(
   try {
     if (isEditing && previousYearId && previousYearId !== targetYear) {
       // Processo mudou de ano (ex: usuário corrigiu data de entrada de 2026 -> 2027)
-      const batch = writeBatch(db);
       const oldRef = doc(db, 'users', uid, 'years', previousYearId, 'notifications', safeId);
-      batch.set(targetRef, {
-        ...updatable,
-        id: safeId,
-        ownerUid: uid,
-        anoExercicio: targetYear,
-        criadoEm: clampStr(record.criadoEm || nowISO, 64),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      batch.delete(oldRef);
-      await batch.commit();
+      await updateNotificationDocWithRepair(
+        uid,
+        targetYear,
+        safeId,
+        updatable,
+        record,
+        nowISO
+      );
+      await deleteDoc(oldRef);
     } else if (isEditing) {
-      await updateDoc(targetRef, {
-        ...updatable,
-        updatedAt: serverTimestamp(),
-      });
+      await updateNotificationDocWithRepair(
+        uid,
+        targetYear,
+        safeId,
+        updatable,
+        record,
+        nowISO
+      );
     } else {
       await setDoc(targetRef, {
         ...updatable,
@@ -513,13 +886,34 @@ export async function toggleHideNotificationInFirestore(
   const yearId = inferAnoExercicio(record, fallbackYear);
   const path = `users/${uid}/years/${yearId}/notifications/${safeId}`;
   const docRef = doc(db, 'users', uid, 'years', yearId, 'notifications', safeId);
+  const nowISO = new Date().toISOString();
   try {
     await updateDoc(docRef, {
       oculto: willHide,
-      atualizadoEm: new Date().toISOString(),
+      atualizadoEm: nowISO,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
+    const code = (error as { code?: string })?.code;
+    const msg = error instanceof Error ? error.message : String(error);
+    if (
+      code === 'permission-denied' ||
+      code === 'not-found' ||
+      msg.includes('Missing or insufficient permissions') ||
+      msg.includes('No document to update')
+    ) {
+      try {
+        await ensureYearBucket(uid, yearId);
+        const updatable = buildUpdatableNotificationFields(
+          { ...record, oculto: willHide },
+          nowISO
+        );
+        await updateNotificationDocWithRepair(uid, yearId, safeId, updatable, record, nowISO);
+        return;
+      } catch (repairError) {
+        handleFirestoreError(repairError, OperationType.UPDATE, path);
+      }
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
@@ -534,14 +928,35 @@ export async function updateHistoricoAndDetailsInFirestore(
   const yearId = inferAnoExercicio(record, fallbackYear);
   const path = `users/${uid}/years/${yearId}/notifications/${safeId}`;
   const docRef = doc(db, 'users', uid, 'years', yearId, 'notifications', safeId);
+  const nowISO = new Date().toISOString();
   try {
     await updateDoc(docRef, {
       historico: sanitizeHistorico(newHistorico),
       detalhesSST: sanitizeDetalhesSST(record.detalhesSST),
-      atualizadoEm: new Date().toISOString(),
+      atualizadoEm: nowISO,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
+    const code = (error as { code?: string })?.code;
+    const msg = error instanceof Error ? error.message : String(error);
+    if (
+      code === 'permission-denied' ||
+      code === 'not-found' ||
+      msg.includes('Missing or insufficient permissions') ||
+      msg.includes('No document to update')
+    ) {
+      try {
+        await ensureYearBucket(uid, yearId);
+        const updatable = buildUpdatableNotificationFields(
+          { ...record, historico: newHistorico },
+          nowISO
+        );
+        await updateNotificationDocWithRepair(uid, yearId, safeId, updatable, record, nowISO);
+        return;
+      } catch (repairError) {
+        handleFirestoreError(repairError, OperationType.UPDATE, path);
+      }
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
@@ -681,10 +1096,14 @@ export async function batchImportNotificationsToFirestore(
       writeTasks.push(async () => {
         try {
           if (shouldUpdate) {
-            await updateDoc(docRef, {
-              ...updatable,
-              updatedAt: serverTimestamp(),
-            });
+            await updateNotificationDocWithRepair(
+              uid,
+              yearId,
+              docId,
+              updatable,
+              rawItem,
+              nowISO
+            );
           } else {
             await setDoc(docRef, {
               ...updatable,
@@ -748,15 +1167,11 @@ export async function syncDgstCorrelationToFirestore(
     const safeId = sanitizeDocId(record.id);
     const yearId = inferAnoExercicio(record, fallbackYear);
     const docPath = `users/${uid}/years/${yearId}/notifications/${safeId}`;
-    const docRef = doc(db, 'users', uid, 'years', yearId, 'notifications', safeId);
     const updatable = buildUpdatableNotificationFields(record, nowISO);
 
     tasks.push(async () => {
       try {
-        await updateDoc(docRef, {
-          ...updatable,
-          updatedAt: serverTimestamp(),
-        });
+        await updateNotificationDocWithRepair(uid, yearId, safeId, updatable, record, nowISO);
         completed += 1;
         onProgress?.(completed, total);
       } catch (error) {

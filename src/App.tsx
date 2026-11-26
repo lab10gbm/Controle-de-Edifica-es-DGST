@@ -1,10 +1,11 @@
-import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Unsubscribe } from 'firebase/firestore';
 import { BuildingNotification, FilterState } from './types';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { NotificationTable } from './components/NotificationTable';
+import { RecordModal } from './components/RecordModal';
 import { AuthGate } from './components/AuthGate';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { LOCALIZACAO_LIST } from './data/initialData';
@@ -49,9 +50,6 @@ import {
   subscribeToFiscalizacoes,
 } from './services/firestoreFiscalizacoes';
 
-const RecordModal = lazy(() =>
-  import('./components/RecordModal').then((m) => ({ default: m.RecordModal }))
-);
 const PrintReportModal = lazy(() =>
   import('./components/PrintReportModal').then((m) => ({ default: m.PrintReportModal }))
 );
@@ -520,17 +518,17 @@ export default function App() {
   // Toast System
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const addToast = (type: 'success' | 'info' | 'warning', title: string, message?: string) => {
+  const addToast = useCallback((type: 'success' | 'info' | 'warning', title: string, message?: string) => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     setToasts((prev) => [...prev, { id, type, title, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4500);
-  };
+  }, []);
 
-  const dismissToast = (id: string) => {
+  const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  }, []);
 
   // Opções disponíveis no filtro de Localização (padrões + eventuais extras presentes no banco)
   const availableLocations = useMemo(() => {
@@ -734,21 +732,61 @@ export default function App() {
       });
   }, [notifications, filters]);
 
+  const latestActionContextRef = useRef({
+    user,
+    selectedYear,
+    currentYear,
+    notifications,
+    filteredNotifications,
+  });
+  latestActionContextRef.current = {
+    user,
+    selectedYear,
+    currentYear,
+    notifications,
+    filteredNotifications,
+  };
+
   // Handlers
-  const handleResetFilters = () => {
+  const handleResetFilters = useCallback(() => {
     setFilters(defaultFilters);
     addToast('info', 'Filtros redefinidos', 'Visualizando todos os registros ativos em ordem numérica.');
-  };
+  }, [addToast]);
 
-  const handleOpenNewRecordModal = () => {
+  const handleOpenNewRecordModal = useCallback(() => {
     setEditingRecord(null);
     setIsRecordModalOpen(true);
-  };
+  }, []);
 
-  const handleEdit = (notification: BuildingNotification) => {
+  const handleOpenImportModal = useCallback(() => {
+    setIsImportModalOpen(true);
+  }, []);
+
+  const handleEdit = useCallback((notification: BuildingNotification) => {
     setEditingRecord(notification);
     setIsRecordModalOpen(true);
-  };
+  }, []);
+
+  const handleCloseRecordModal = useCallback(() => {
+    setIsRecordModalOpen(false);
+  }, []);
+
+  const handleEnsureProcessVisible = useCallback(
+    (target: BuildingNotification) => {
+      const isVisible = latestActionContextRef.current.filteredNotifications.some(
+        (n) => n.id === target.id
+      );
+      if (!isVisible) {
+        setFilters(defaultFilters);
+        addToast(
+          'info',
+          'Filtro ajustado',
+          `Exibindo o processo vinculado ${formatProcessoNumeroAno(target.processo ?? target.numero, { ano: target.anoExercicio })}.`
+        );
+      }
+    },
+    [addToast]
+  );
 
   const handleSaveRecord = async (record: BuildingNotification, isEditing: boolean) => {
     if (!user) return;
@@ -855,9 +893,11 @@ export default function App() {
     }
   };
 
-  const handleAddQuickNote = async (id: string, noteText: string, author: string) => {
-    if (!user) return;
-    const target = notifications.find((n) => n.id === id);
+  const handleAddQuickNote = useCallback(async (id: string, noteText: string, author: string) => {
+    const { user: currentUser, notifications: currentNotifs, selectedYear: selYear, currentYear: curYear } =
+      latestActionContextRef.current;
+    if (!currentUser) return;
+    const target = currentNotifs.find((n) => n.id === id);
     if (!target) return;
 
     const timestamp = `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
@@ -869,25 +909,25 @@ export default function App() {
       detalhes: noteText,
     };
     const newHistorico = [newLog, ...(target.historico || [])];
-    const fallbackYear = selectedYear === 'TODOS' ? currentYear : selectedYear;
+    const fallbackYear = selYear === 'TODOS' ? curYear : selYear;
 
     try {
-      await updateHistoricoAndDetailsInFirestore(user.uid, target, newHistorico, fallbackYear);
+      await updateHistoricoAndDetailsInFirestore(currentUser.uid, target, newHistorico, fallbackYear);
       addToast('success', 'Despacho salvo no Firestore!', 'Novo evento gravado na linha do tempo do processo.');
     } catch (err) {
       setFatalError(err instanceof Error ? err : new Error(String(err)));
     }
-  };
+  }, [addToast]);
 
-  const handleOpenPrintReport = () => {
+  const handleOpenPrintReport = useCallback(() => {
     setSinglePrintRecord(null);
     setIsPrintModalOpen(true);
-  };
+  }, []);
 
-  const handlePrintSingle = (notification: BuildingNotification) => {
+  const handlePrintSingle = useCallback((notification: BuildingNotification) => {
     setSinglePrintRecord(notification);
     setIsPrintModalOpen(true);
-  };
+  }, []);
 
   const handleExportCSV = () => {
     exportToCSV(
@@ -997,9 +1037,9 @@ export default function App() {
     addToast('info', 'Rascunho local descartado', 'A plataforma utiliza exclusivamente os dados do Firestore.');
   };
 
-  const handleRequestDelete = (notification: BuildingNotification) => {
+  const handleRequestDelete = useCallback((notification: BuildingNotification) => {
     setDeletingRecord(notification);
-  };
+  }, []);
 
   const executeDeleteSingleRecord = async () => {
     if (!user || !deletingRecord || isDeletingSingle) return;
@@ -1079,12 +1119,14 @@ export default function App() {
     }
   };
 
-  const handleUpdateNotification = async (updated: BuildingNotification) => {
-    if (!user) return;
-    const fallbackYear = selectedYear === 'TODOS' ? currentYear : selectedYear;
+  const handleUpdateNotification = useCallback(async (updated: BuildingNotification) => {
+    const { user: currentUser, selectedYear: selYear, currentYear: curYear } =
+      latestActionContextRef.current;
+    if (!currentUser) return;
+    const fallbackYear = selYear === 'TODOS' ? curYear : selYear;
     const prevYear = inferAnoExercicio(updated, fallbackYear);
     try {
-      await saveNotificationToFirestore(user.uid, updated, true, fallbackYear, prevYear);
+      await saveNotificationToFirestore(currentUser.uid, updated, true, fallbackYear, prevYear);
       addToast(
         'success',
         'Processo atualizado no Firestore!',
@@ -1093,7 +1135,7 @@ export default function App() {
     } catch (err) {
       setFatalError(err instanceof Error ? err : new Error(String(err)));
     }
-  };
+  }, [addToast]);
 
   const handleSignOut = async () => {
     try {
@@ -1285,18 +1327,8 @@ export default function App() {
               onResetFilters={handleResetFilters}
               onUpdateNotification={handleUpdateNotification}
               selectedLocalizacao={filters.localizacao}
-              onEnsureProcessVisible={(target) => {
-                const isVisible = filteredNotifications.some((n) => n.id === target.id);
-                if (!isVisible) {
-                  setFilters(defaultFilters);
-                  addToast(
-                    'info',
-                    'Filtro ajustado',
-                    `Exibindo o processo vinculado ${formatProcessoNumeroAno(target.processo ?? target.numero, { ano: target.anoExercicio })}.`
-                  );
-                }
-              }}
-              onOpenImportModal={() => setIsImportModalOpen(true)}
+              onEnsureProcessVisible={handleEnsureProcessVisible}
+              onOpenImportModal={handleOpenImportModal}
               onOpenNewRecordModal={handleOpenNewRecordModal}
             />
           </>
@@ -1493,15 +1525,14 @@ export default function App() {
 
       {/* Record Creation / Edition Modal */}
       {isRecordModalOpen && (
-        <Suspense fallback={null}>
-          <RecordModal
-            isOpen={isRecordModalOpen}
-            onClose={() => setIsRecordModalOpen(false)}
-            onSave={handleSaveRecord}
-            editingRecord={editingRecord}
-            nextNumber={nextNumber}
-          />
-        </Suspense>
+        <RecordModal
+          key={editingRecord ? editingRecord.id : 'new'}
+          isOpen={isRecordModalOpen}
+          onClose={handleCloseRecordModal}
+          onSave={handleSaveRecord}
+          editingRecord={editingRecord}
+          nextNumber={nextNumber}
+        />
       )}
 
       {/* Import CSV Modal */}

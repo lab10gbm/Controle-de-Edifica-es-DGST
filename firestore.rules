@@ -50,12 +50,13 @@ service cloud.firestore {
     }
 
     function isValidDocumentType(val) {
-      return val is string && val.size() >= 3 && val.size() <= 40 && (
-        val == 'TAC'
-        || val.matches('^Notifica.{2,6}o( Preventiva)?$')
-        || val.matches('^Auto de Infra.{2,6}o$')
-        || val.matches('^Interdi.{2,6}o$')
-      );
+      return val is string && val.size() >= 3 && val.size() <= 40 && val in [
+        'Notificação',
+        'Auto de Infração',
+        'Notificação Preventiva',
+        'Interdição',
+        'TAC'
+      ];
     }
 
     function isValidFiscalizacaoStatus(val) {

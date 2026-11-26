@@ -6,7 +6,7 @@ import {
   BilheteItem
 } from '../types';
 import { OBM_LIST, STATUS_LIST, LOCALIZACAO_LIST, TIPOS_PROCESSO_LIST } from '../data/initialData';
-import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST, deriveListaBilhetes, buildDetalhesSSTWithBilhetes } from '../utils/helpers';
+import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST, deriveListaBilhetes, buildDetalhesSSTWithBilhetes, calcularPrazoProcesso } from '../utils/helpers';
 import { cleanProcessLinkValue } from '../utils/processLinks';
 import { 
   X, 
@@ -35,6 +35,281 @@ interface RecordModalProps {
   nextNumber: number;
 }
 
+interface RecordModalInitialState {
+  numero: number;
+  processo: string;
+  is4BlocksMode: boolean;
+  blocoPrefixo: string;
+  blocoNumero: string;
+  blocoCodigo: string;
+  blocoAno: string;
+  codigoDocumento: string;
+  edificacao: string;
+  requerente: string;
+  requerenteCpfCnpj: string;
+  tipoProcesso: string;
+  origem: string;
+  localizacao: string;
+  docGerado: string;
+  dataAoDiretor: string;
+  showDocGeradoFields: boolean;
+  dataPronto: string;
+  outrosBilhetes: string;
+  processoAntigo: string;
+  numDocAntigo: string;
+  processoSeguinte: string;
+  showVinculosFields: boolean;
+  status: StatusType;
+  tipoDocumento: DocumentType;
+  obm: string;
+  dataExpedicao: string;
+  dataValidade: string;
+  logradouro: string;
+  numeroEndereco: string;
+  complemento: string;
+  bairro: string;
+  municipio: string;
+  cep: string;
+  pontoReferencia: string;
+  repetirRequerente: boolean;
+  proprietarioTipoVinculo: string;
+  proprietarioNome: string;
+  proprietarioDoc: string;
+  proprietarioTelefone: string;
+  listaBilhetes: BilheteItem[];
+  novoBilheteData: string;
+  novoBilheteAutor: string;
+  fiscalResponsavel: string;
+  matriculaFiscal: string;
+  processoAdministrativo: string;
+  exigencias: string[];
+  observacoes: string;
+}
+
+function resolveInitialBlocks(
+  rawVal: string,
+  fallbackCodigo: string,
+  fallbackAno: string
+): { prefixo: string; numero: string; codigo: string; ano: string } {
+  const trimmed = rawVal.trim().toUpperCase();
+  const partsMatch = trimmed.match(/^([A-Z]-?\d+)\s*\/\s*(\d{1,7})\s*\/\s*(\d{0,6})\s*\/\s*(\d{2,4})$/);
+  if (partsMatch) {
+    const y = partsMatch[4];
+    return {
+      prefixo: partsMatch[1].replace('-', ''),
+      numero: partsMatch[2],
+      codigo: partsMatch[3] || fallbackCodigo || '',
+      ano: y.length === 2 ? `20${y}` : y,
+    };
+  }
+  const parsed = parseProcessoE27(trimmed, { codigo: fallbackCodigo, ano: fallbackAno });
+  if (parsed) {
+    return {
+      prefixo: 'E27',
+      numero: parsed.numeroBruto || String(parsed.numero),
+      codigo: parsed.codigo || fallbackCodigo || '',
+      ano: parsed.ano || fallbackAno || getTodayISO().slice(0, 4),
+    };
+  }
+  return {
+    prefixo: 'E27',
+    numero: trimmed.replace(/[^\d]/g, ''),
+    codigo: fallbackCodigo || '',
+    ano: fallbackAno || getTodayISO().slice(0, 4),
+  };
+}
+
+function buildInitialModalState(
+  editingRecord: BuildingNotification | null,
+  nextNumber: number
+): RecordModalInitialState {
+  const hojeISO = getTodayISO();
+  if (!editingRecord) {
+    const prazoInicial = adicionarDiasAData(hojeISO, getDiasPrazoPorTipo('CERTIFICADO DE APROVAÇÃO'));
+    return {
+      numero: nextNumber,
+      processo: '',
+      is4BlocksMode: true,
+      blocoPrefixo: 'E27',
+      blocoNumero: '',
+      blocoCodigo: getCodigoPorTipo('CERTIFICADO DE APROVAÇÃO'),
+      blocoAno: hojeISO.slice(0, 4),
+      codigoDocumento: '',
+      edificacao: '',
+      requerente: '',
+      requerenteCpfCnpj: '',
+      tipoProcesso: 'CERTIFICADO DE APROVAÇÃO',
+      origem: '10º GBM - ANGRA DOS REIS',
+      localizacao: 'PROTOCOLO',
+      docGerado: '',
+      dataAoDiretor: '',
+      showDocGeradoFields: false,
+      dataPronto: '',
+      outrosBilhetes: '',
+      processoAntigo: '',
+      numDocAntigo: '',
+      processoSeguinte: '',
+      showVinculosFields: false,
+      status: 'Notificação',
+      tipoDocumento: 'Notificação',
+      obm: '10º GBM - ANGRA DOS REIS',
+      dataExpedicao: hojeISO,
+      dataValidade: prazoInicial.dataISO,
+      logradouro: '',
+      numeroEndereco: '',
+      complemento: '',
+      bairro: '',
+      municipio: 'Angra dos Reis',
+      cep: '',
+      pontoReferencia: '',
+      repetirRequerente: false,
+      proprietarioTipoVinculo: 'Proprietário / Responsável Legal',
+      proprietarioNome: '',
+      proprietarioDoc: '',
+      proprietarioTelefone: '',
+      listaBilhetes: [],
+      novoBilheteData: hojeISO,
+      novoBilheteAutor: 'Fiscal SST 10º GBM',
+      fiscalResponsavel: '',
+      matriculaFiscal: '',
+      processoAdministrativo: '',
+      exigencias: [],
+      observacoes: '',
+    };
+  }
+
+  const rawProcVal =
+    editingRecord.processo !== undefined
+      ? (editingRecord.processo || '')
+      : (editingRecord.numero ? String(editingRecord.numero).padStart(5, '0') : '');
+
+  const fallbackAnoEdit =
+    editingRecord.anoExercicio ||
+    (editingRecord.dataEntrada || editingRecord.dataExpedicao || '').match(/\b(20\d{2})\b/)?.[1] ||
+    hojeISO.slice(0, 4);
+  const fallbackCodEdit = editingRecord.detalhesSST?.codigo || '';
+  const parsedEdit = parseProcessoE27(rawProcVal, {
+    codigo: fallbackCodEdit,
+    ano: fallbackAnoEdit,
+  });
+  const isNonStandardText =
+    Boolean(rawProcVal.trim()) &&
+    rawProcVal.trim().toUpperCase() !== 'S/N' &&
+    !parsedEdit;
+  const blocks = resolveInitialBlocks(rawProcVal, fallbackCodEdit, fallbackAnoEdit);
+
+  const reqNomeEdit = editingRecord.requerente || editingRecord.edificacao || '';
+  const propNomeEdit = editingRecord.proprietario?.nomeOuRazaoSocial || '';
+  const propDocEdit = editingRecord.proprietario?.cpfOuCnpj || '';
+  const reqDocEdit =
+    editingRecord.requerenteCpfCnpj !== undefined
+      ? (editingRecord.requerenteCpfCnpj || '')
+      : (propDocEdit && (!propNomeEdit.trim() || propNomeEdit.trim().toUpperCase() === reqNomeEdit.trim().toUpperCase())
+          ? propDocEdit
+          : '');
+
+  const tipo = editingRecord.tipoProcesso || editingRecord.tipoDocumento || 'CERTIFICADO DE APROVAÇÃO';
+  const rawLoc = (editingRecord.detalhesSST?.localizacao || '').trim();
+  const normLoc = rawLoc.toUpperCase().replace(/\s+/g, ' ');
+  const normalizedLoc =
+    normLoc === 'PASTA INTERNET' || normLoc === 'PRANCHETA'
+      ? 'INTERNET'
+      : rawLoc || 'PROTOCOLO';
+
+  const editDocGerado = editingRecord.detalhesSST?.docGerado || '';
+  const rawEditDataAoDiretor = editingRecord.detalhesSST?.dataAoDiretor || editingRecord.detalhesSST?.aoDiretor || '';
+  let editDataAoDiretorISO = '';
+  if (rawEditDataAoDiretor.trim() && rawEditDataAoDiretor !== '-' && rawEditDataAoDiretor !== '- - - -') {
+    const cleanAoDir = rawEditDataAoDiretor.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanAoDir)) {
+      editDataAoDiretorISO = cleanAoDir;
+    } else {
+      const brFull = cleanAoDir.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      const brShort = cleanAoDir.match(/^(\d{1,2})\/(\d{1,2})$/);
+      if (brFull) {
+        const y = brFull[3].length === 2 ? `20${brFull[3]}` : brFull[3];
+        editDataAoDiretorISO = `${y}-${brFull[2].padStart(2, '0')}-${brFull[1].padStart(2, '0')}`;
+      } else if (brShort) {
+        editDataAoDiretorISO = `${fallbackAnoEdit}-${brShort[2].padStart(2, '0')}-${brShort[1].padStart(2, '0')}`;
+      }
+    }
+  }
+
+  const cleanAntigo = cleanProcessLinkValue(editingRecord.detalhesSST?.processoAntigo);
+  const cleanNumDocAntigo = cleanProcessLinkValue(editingRecord.detalhesSST?.numDocAntigo);
+  const cleanSeguinte = cleanProcessLinkValue(editingRecord.detalhesSST?.processoSeguinte);
+
+  const rawEntrada =
+    editingRecord.detalhesSST?.entradaSST ||
+    editingRecord.dataEntrada ||
+    editingRecord.dataExpedicao ||
+    '';
+  const parsedEntradaISO = rawEntrada ? adicionarDiasAData(rawEntrada, 0).dataISO : '';
+  const entradaISO = /^\d{4}-\d{2}-\d{2}$/.test(parsedEntradaISO) ? parsedEntradaISO : hojeISO;
+
+  const rawValidade = editingRecord.dataTramite || editingRecord.dataValidade || '';
+  const parsedValidadeISO = rawValidade ? adicionarDiasAData(rawValidade, 0).dataISO : '';
+  const validadeISO = /^\d{4}-\d{2}-\d{2}$/.test(parsedValidadeISO)
+    ? parsedValidadeISO
+    : adicionarDiasAData(entradaISO, getDiasPrazoPorTipo(tipo)).dataISO;
+
+  const isSameAsRequerente =
+    Boolean(reqNomeEdit.trim()) &&
+    propNomeEdit.trim().toUpperCase() === reqNomeEdit.trim().toUpperCase() &&
+    reqDocEdit.trim().toUpperCase() === propDocEdit.trim().toUpperCase();
+
+  return {
+    numero: editingRecord.numero,
+    processo: rawProcVal,
+    is4BlocksMode: !isNonStandardText,
+    blocoPrefixo: blocks.prefixo,
+    blocoNumero: blocks.numero,
+    blocoCodigo: blocks.codigo,
+    blocoAno: blocks.ano,
+    codigoDocumento: editingRecord.codigoDocumento || '',
+    edificacao: editingRecord.edificacao || '',
+    requerente: reqNomeEdit,
+    requerenteCpfCnpj: reqDocEdit,
+    tipoProcesso: tipo,
+    origem: editingRecord.origem || editingRecord.obm || '10º GBM - ANGRA DOS REIS',
+    localizacao: normalizedLoc,
+    docGerado: editDocGerado,
+    dataAoDiretor: editDataAoDiretorISO,
+    showDocGeradoFields: Boolean(editDocGerado.trim() || editDataAoDiretorISO || rawEditDataAoDiretor.trim()),
+    dataPronto: editingRecord.detalhesSST?.dataPronto || '',
+    outrosBilhetes: editingRecord.detalhesSST?.outrosBilhetes || '',
+    processoAntigo: cleanAntigo,
+    numDocAntigo: cleanNumDocAntigo,
+    processoSeguinte: cleanSeguinte,
+    showVinculosFields: Boolean(cleanAntigo || cleanNumDocAntigo || cleanSeguinte),
+    status: editingRecord.status,
+    tipoDocumento: editingRecord.tipoDocumento,
+    obm: editingRecord.obm || '10º GBM - ANGRA DOS REIS',
+    dataExpedicao: entradaISO,
+    dataValidade: validadeISO,
+    logradouro: editingRecord.endereco?.logradouro || '',
+    numeroEndereco: editingRecord.endereco?.numero || '',
+    complemento: editingRecord.endereco?.complemento || '',
+    bairro: editingRecord.endereco?.bairro || '',
+    municipio: editingRecord.endereco?.municipio || 'Angra dos Reis',
+    cep: editingRecord.endereco?.cep || '',
+    pontoReferencia: editingRecord.endereco?.pontoReferencia || '',
+    repetirRequerente: isSameAsRequerente,
+    proprietarioTipoVinculo: editingRecord.proprietario?.tipoVinculo || 'Proprietário / Responsável Legal',
+    proprietarioNome: propNomeEdit,
+    proprietarioDoc: propDocEdit,
+    proprietarioTelefone: editingRecord.proprietario?.telefone || '',
+    listaBilhetes: deriveListaBilhetes(editingRecord.id, editingRecord.detalhesSST),
+    novoBilheteData: hojeISO,
+    novoBilheteAutor: editingRecord.fiscalResponsavel?.trim() || 'Fiscal SST 10º GBM',
+    fiscalResponsavel: editingRecord.fiscalResponsavel || '',
+    matriculaFiscal: editingRecord.matriculaFiscal || '',
+    processoAdministrativo: editingRecord.processoAdministrativo || '',
+    exigencias: editingRecord.exigencias || [],
+    observacoes: editingRecord.observacoes || '',
+  };
+}
+
 export const RecordModal: React.FC<RecordModalProps> = ({
   isOpen,
   onClose,
@@ -43,75 +318,82 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   nextNumber,
 }) => {
   const isEditing = Boolean(editingRecord);
+  const initialStateRef = useRef<RecordModalInitialState | null>(null);
+  if (initialStateRef.current === null) {
+    initialStateRef.current = buildInitialModalState(editingRecord, nextNumber);
+  }
+  const init = initialStateRef.current;
+  const didMountSyncRef = useRef(false);
 
-  // Form State
-  const [numero, setNumero] = useState<number>(nextNumber);
-  const [processo, setProcesso] = useState<string>('');
-  const [is4BlocksMode, setIs4BlocksMode] = useState<boolean>(true);
-  const [blocoPrefixo, setBlocoPrefixo] = useState<string>('E27');
-  const [blocoNumero, setBlocoNumero] = useState<string>('');
-  const [blocoCodigo, setBlocoCodigo] = useState<string>('');
-  const [blocoAno, setBlocoAno] = useState<string>(() => getTodayISO().slice(0, 4));
+  // Form State (já inicializado na primeira renderização para abertura instantânea)
+  const [numero, setNumero] = useState<number>(init.numero);
+  const [processo, setProcesso] = useState<string>(init.processo);
+  const [is4BlocksMode, setIs4BlocksMode] = useState<boolean>(init.is4BlocksMode);
+  const [blocoPrefixo, setBlocoPrefixo] = useState<string>(init.blocoPrefixo);
+  const [blocoNumero, setBlocoNumero] = useState<string>(init.blocoNumero);
+  const [blocoCodigo, setBlocoCodigo] = useState<string>(init.blocoCodigo);
+  const [blocoAno, setBlocoAno] = useState<string>(init.blocoAno);
   const blocoPrefixoRef = useRef<HTMLInputElement>(null);
   const blocoNumeroRef = useRef<HTMLInputElement>(null);
   const blocoCodigoRef = useRef<HTMLInputElement>(null);
   const blocoAnoRef = useRef<HTMLInputElement>(null);
-  const [codigoDocumento, setCodigoDocumento] = useState('');
-  const [edificacao, setEdificacao] = useState('');
-  const [requerente, setRequerente] = useState('');
-  const [requerenteCpfCnpj, setRequerenteCpfCnpj] = useState('');
-  const [tipoProcesso, setTipoProcesso] = useState<string>('CERTIFICADO DE APROVAÇÃO');
-  const [origem, setOrigem] = useState('10º GBM - ANGRA DOS REIS');
-  const [localizacao, setLocalizacao] = useState('PROTOCOLO');
-  const [docGerado, setDocGerado] = useState('');
-  const [dataAoDiretor, setDataAoDiretor] = useState('');
-  const [showDocGeradoFields, setShowDocGeradoFields] = useState(false);
-  const [dataPronto, setDataPronto] = useState('');
-  const [outrosBilhetes, setOutrosBilhetes] = useState('');
-  const [processoAntigo, setProcessoAntigo] = useState('');
-  const [numDocAntigo, setNumDocAntigo] = useState('');
-  const [processoSeguinte, setProcessoSeguinte] = useState('');
-  const [status, setStatus] = useState<StatusType>('Notificação');
-  const [tipoDocumento, setTipoDocumento] = useState<DocumentType>('Notificação');
-  const [obm, setObm] = useState('10º GBM - ANGRA DOS REIS');
-  const [dataExpedicao, setDataExpedicao] = useState(() => getTodayISO());
-  const [dataValidade, setDataValidade] = useState('');
+  const [codigoDocumento, setCodigoDocumento] = useState(init.codigoDocumento);
+  const [edificacao, setEdificacao] = useState(init.edificacao);
+  const [requerente, setRequerente] = useState(init.requerente);
+  const [requerenteCpfCnpj, setRequerenteCpfCnpj] = useState(init.requerenteCpfCnpj);
+  const [tipoProcesso, setTipoProcesso] = useState<string>(init.tipoProcesso);
+  const [origem, setOrigem] = useState(init.origem);
+  const [localizacao, setLocalizacao] = useState(init.localizacao);
+  const [docGerado, setDocGerado] = useState(init.docGerado);
+  const [dataAoDiretor, setDataAoDiretor] = useState(init.dataAoDiretor);
+  const [showDocGeradoFields, setShowDocGeradoFields] = useState(init.showDocGeradoFields);
+  const [dataPronto, setDataPronto] = useState(init.dataPronto);
+  const [outrosBilhetes, setOutrosBilhetes] = useState(init.outrosBilhetes);
+  const [processoAntigo, setProcessoAntigo] = useState(init.processoAntigo);
+  const [numDocAntigo, setNumDocAntigo] = useState(init.numDocAntigo);
+  const [processoSeguinte, setProcessoSeguinte] = useState(init.processoSeguinte);
+  const [showVinculosFields, setShowVinculosFields] = useState(init.showVinculosFields);
+  const [status, setStatus] = useState<StatusType>(init.status);
+  const [tipoDocumento, setTipoDocumento] = useState<DocumentType>(init.tipoDocumento);
+  const [obm, setObm] = useState(init.obm);
+  const [dataExpedicao, setDataExpedicao] = useState(init.dataExpedicao);
+  const [dataValidade, setDataValidade] = useState(init.dataValidade);
   
   // Localização (Opcional - usuário pode preencher livremente quando houver)
-  const [logradouro, setLogradouro] = useState('');
-  const [numeroEndereco, setNumeroEndereco] = useState('');
-  const [complemento, setComplemento] = useState('');
-  const [bairro, setBairro] = useState('');
-  const [municipio, setMunicipio] = useState('Angra dos Reis');
-  const [cep, setCep] = useState('');
-  const [pontoReferencia, setPontoReferencia] = useState('');
+  const [logradouro, setLogradouro] = useState(init.logradouro);
+  const [numeroEndereco, setNumeroEndereco] = useState(init.numeroEndereco);
+  const [complemento, setComplemento] = useState(init.complemento);
+  const [bairro, setBairro] = useState(init.bairro);
+  const [municipio, setMunicipio] = useState(init.municipio);
+  const [cep, setCep] = useState(init.cep);
+  const [pontoReferencia, setPontoReferencia] = useState(init.pontoReferencia);
 
   // Proprietário / Responsável Legal / Síndico (Opcional)
-  const [repetirRequerente, setRepetirRequerente] = useState<boolean>(false);
-  const [proprietarioTipoVinculo, setProprietarioTipoVinculo] = useState('Proprietário / Responsável Legal');
-  const [proprietarioNome, setProprietarioNome] = useState('');
-  const [proprietarioDoc, setProprietarioDoc] = useState('');
-  const [proprietarioTelefone, setProprietarioTelefone] = useState('');
+  const [repetirRequerente, setRepetirRequerente] = useState<boolean>(init.repetirRequerente);
+  const [proprietarioTipoVinculo, setProprietarioTipoVinculo] = useState(init.proprietarioTipoVinculo);
+  const [proprietarioNome, setProprietarioNome] = useState(init.proprietarioNome);
+  const [proprietarioDoc, setProprietarioDoc] = useState(init.proprietarioDoc);
+  const [proprietarioTelefone, setProprietarioTelefone] = useState(init.proprietarioTelefone);
 
   // Controle e Relação de Bilhetes do Processo (Seção 4)
-  const [listaBilhetes, setListaBilhetes] = useState<BilheteItem[]>([]);
+  const [listaBilhetes, setListaBilhetes] = useState<BilheteItem[]>(init.listaBilhetes);
   const [isAddingBilheteModal, setIsAddingBilheteModal] = useState(false);
   const [novoDetalheTipo, setNovoDetalheTipo] = useState<'BILHETE' | 'RETORNO'>('BILHETE');
-  const [novoBilheteData, setNovoBilheteData] = useState(() => getTodayISO());
+  const [novoBilheteData, setNovoBilheteData] = useState(init.novoBilheteData);
   const [novoBilheteDias, setNovoBilheteDias] = useState('0');
   const [novoBilheteStatus, setNovoBilheteStatus] = useState('EM ANÁLISE');
-  const [novoBilheteAutor, setNovoBilheteAutor] = useState('Fiscal SST 10º GBM');
+  const [novoBilheteAutor, setNovoBilheteAutor] = useState(init.novoBilheteAutor);
   const [novoBilheteDespacho, setNovoBilheteDespacho] = useState('');
 
   // Fiscalização (Totalmente editável pelo usuário sem dados inventados)
-  const [fiscalResponsavel, setFiscalResponsavel] = useState('');
-  const [matriculaFiscal, setMatriculaFiscal] = useState('');
-  const [processoAdministrativo, setProcessoAdministrativo] = useState('');
+  const [fiscalResponsavel, setFiscalResponsavel] = useState(init.fiscalResponsavel);
+  const [matriculaFiscal, setMatriculaFiscal] = useState(init.matriculaFiscal);
+  const [processoAdministrativo, setProcessoAdministrativo] = useState(init.processoAdministrativo);
   
   // Exigências & Obs (Totalmente editável pelo usuário)
-  const [exigencias, setExigencias] = useState<string[]>([]);
+  const [exigencias, setExigencias] = useState<string[]>(init.exigencias);
   const [novaExigencia, setNovaExigencia] = useState('');
-  const [observacoes, setObservacoes] = useState('');
+  const [observacoes, setObservacoes] = useState(init.observacoes);
 
   // Justificativa para log de auditoria
   const [justificativaAlteracao, setJustificativaAlteracao] = useState('');
@@ -268,6 +550,10 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   };
 
   useEffect(() => {
+    if (!didMountSyncRef.current) {
+      didMountSyncRef.current = true;
+      return;
+    }
     if (editingRecord) {
       setNumero(editingRecord.numero);
       const rawProcVal =
@@ -345,9 +631,13 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setShowDocGeradoFields(Boolean(editDocGerado.trim() || editDataAoDiretorISO || rawEditDataAoDiretor.trim()));
       setDataPronto(editingRecord.detalhesSST?.dataPronto || '');
       setOutrosBilhetes(editingRecord.detalhesSST?.outrosBilhetes || '');
-      setProcessoAntigo(cleanProcessLinkValue(editingRecord.detalhesSST?.processoAntigo));
-      setNumDocAntigo(cleanProcessLinkValue(editingRecord.detalhesSST?.numDocAntigo));
-      setProcessoSeguinte(cleanProcessLinkValue(editingRecord.detalhesSST?.processoSeguinte));
+      const cleanAntigo = cleanProcessLinkValue(editingRecord.detalhesSST?.processoAntigo);
+      const cleanNumDocAntigo = cleanProcessLinkValue(editingRecord.detalhesSST?.numDocAntigo);
+      const cleanSeguinte = cleanProcessLinkValue(editingRecord.detalhesSST?.processoSeguinte);
+      setProcessoAntigo(cleanAntigo);
+      setNumDocAntigo(cleanNumDocAntigo);
+      setProcessoSeguinte(cleanSeguinte);
+      setShowVinculosFields(Boolean(cleanAntigo || cleanNumDocAntigo || cleanSeguinte));
       setStatus(editingRecord.status);
       setTipoDocumento(editingRecord.tipoDocumento);
       setObm(editingRecord.obm || '10º GBM - ANGRA DOS REIS');
@@ -433,6 +723,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setProcessoAntigo('');
       setNumDocAntigo('');
       setProcessoSeguinte('');
+      setShowVinculosFields(false);
       setStatus('Notificação');
       setTipoDocumento('Notificação');
       setObm('10º GBM - ANGRA DOS REIS');
@@ -554,6 +845,42 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       processoAdministrativo.trim() ||
       (parsedE27?.formattedE27 ? parsedE27.formattedE27 : undefined);
 
+    const nextDetalhesSST = buildDetalhesSSTWithBilhetes(
+      {
+        ...(editingRecord?.detalhesSST || {}),
+        codigo: finalCodigoSST,
+        entradaSST: formatDateBR(dataExpedicao),
+        localizacao: localizacao.trim(),
+        docGerado: docGerado.trim(),
+        dataAoDiretor: dataAoDiretor.trim()
+          ? (/^\d{4}-\d{2}-\d{2}$/.test(dataAoDiretor.trim()) ? formatDateBR(dataAoDiretor.trim()) : dataAoDiretor.trim())
+          : '',
+        aoDiretor: dataAoDiretor.trim()
+          ? (/^\d{4}-\d{2}-\d{2}$/.test(dataAoDiretor.trim()) ? formatDateBR(dataAoDiretor.trim()) : dataAoDiretor.trim())
+          : '',
+        dataPronto: dataPronto.trim(),
+        outrosBilhetes: outrosBilhetes.trim(),
+        processoAntigo: cleanProcessLinkValue(processoAntigo),
+        numDocAntigo: cleanProcessLinkValue(numDocAntigo).toUpperCase(),
+        processoSeguinte: cleanProcessLinkValue(processoSeguinte),
+      },
+      listaBilhetes,
+      outrosBilhetes.trim()
+    );
+
+    const prazoRecalc = calcularPrazoProcesso({
+      dataEntrada: dataExpedicao,
+      tipoProcesso: tipoProcesso.trim() || 'Processo de Regularização',
+      status,
+      detalhesSST: nextDetalhesSST,
+    });
+    const finalDataValidade =
+      (prazoRecalc.prazoBilheteAtivo || prazoRecalc.hasRetornoContinuo) && prazoRecalc.dataLimiteISO
+        ? prazoRecalc.dataLimiteISO
+        : dataValidade
+        ? dataValidade
+        : null;
+
     const updatedRecord: BuildingNotification = {
       id: editingRecord ? editingRecord.id : `notif-${Date.now()}`,
       numero: extractedNum,
@@ -569,8 +896,8 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       obm,
       dataExpedicao,
       dataEntrada: dataExpedicao,
-      dataValidade: dataValidade ? dataValidade : null,
-      dataTramite: dataValidade ? dataValidade : null,
+      dataValidade: finalDataValidade,
+      dataTramite: finalDataValidade,
       oculto: editingRecord ? editingRecord.oculto : false,
       endereco: {
         logradouro: logradouro.trim(),
@@ -628,28 +955,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         ? dataExpedicao.slice(0, 4)
         : editingRecord?.anoExercicio,
       ownerUid: editingRecord?.ownerUid,
-      detalhesSST: buildDetalhesSSTWithBilhetes(
-        {
-          ...(editingRecord?.detalhesSST || {}),
-          codigo: finalCodigoSST,
-          entradaSST: formatDateBR(dataExpedicao),
-          localizacao: localizacao.trim(),
-          docGerado: docGerado.trim(),
-          dataAoDiretor: dataAoDiretor.trim()
-            ? (/^\d{4}-\d{2}-\d{2}$/.test(dataAoDiretor.trim()) ? formatDateBR(dataAoDiretor.trim()) : dataAoDiretor.trim())
-            : '',
-          aoDiretor: dataAoDiretor.trim()
-            ? (/^\d{4}-\d{2}-\d{2}$/.test(dataAoDiretor.trim()) ? formatDateBR(dataAoDiretor.trim()) : dataAoDiretor.trim())
-            : '',
-          dataPronto: dataPronto.trim(),
-          outrosBilhetes: outrosBilhetes.trim(),
-          processoAntigo: cleanProcessLinkValue(processoAntigo),
-          numDocAntigo: cleanProcessLinkValue(numDocAntigo).toUpperCase(),
-          processoSeguinte: cleanProcessLinkValue(processoSeguinte),
-        },
-        listaBilhetes,
-        outrosBilhetes.trim()
-      ),
+      detalhesSST: nextDetalhesSST,
     };
 
     onSave(updatedRecord, isEditing);
@@ -657,7 +963,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/65 flex items-center justify-center p-3 sm:p-6">
       <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
@@ -1205,55 +1511,79 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
 
             {/* Vínculos de Continuidade (Processo Anterior / Processo Seguinte) */}
-            <div className="mt-3 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Link2 className="w-3.5 h-3.5 text-blue-700" />
-                  <span>Vínculos de Continuidade entre Processos</span>
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  Conecta processos indeferidos/anteriores ao novo processo na plataforma
-                </span>
+            {!showVinculosFields ? (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowVinculosFields(true)}
+                  className="w-full px-3 py-2 text-xs font-semibold text-blue-800 bg-blue-50/70 hover:bg-blue-100/80 border border-dashed border-blue-300 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar Vínculo de continuidade entre processos</span>
+                </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Processo Anterior (PROCESSO ANTIGO)
-                  </label>
-                  <input
-                    type="text"
-                    value={processoAntigo}
-                    onChange={(e) => setProcessoAntigo(e.target.value.toUpperCase())}
-                    placeholder="Ex: 0075/26"
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-900 font-mono font-semibold"
-                  />
+            ) : (
+              <div className="mt-3 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Link2 className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Vínculos de Continuidade entre Processos</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500">
+                      Conecta processos indeferidos/anteriores ao novo processo na plataforma
+                    </span>
+                    {!processoAntigo.trim() && !numDocAntigo.trim() && !processoSeguinte.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setShowVinculosFields(false)}
+                        className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer shrink-0"
+                      >
+                        Ocultar
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Nº do Doc. Anterior
-                  </label>
-                  <input
-                    type="text"
-                    value={numDocAntigo}
-                    onChange={(e) => setNumDocAntigo(e.target.value.toUpperCase())}
-                    placeholder="Ex: DI-1029, LE-112"
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-900 font-mono font-semibold uppercase"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Próximo Processo (PROCESSO SEGUINTE)
-                  </label>
-                  <input
-                    type="text"
-                    value={processoSeguinte}
-                    onChange={(e) => setProcessoSeguinte(e.target.value.toUpperCase())}
-                    placeholder="Ex: 2394"
-                    className="w-full px-3 py-1.5 text-xs bg-blue-50/50 border border-blue-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-blue-950 font-mono font-bold"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Processo Anterior (PROCESSO ANTIGO)
+                    </label>
+                    <input
+                      type="text"
+                      value={processoAntigo}
+                      onChange={(e) => setProcessoAntigo(e.target.value.toUpperCase())}
+                      placeholder="Ex: 0075/26"
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-900 font-mono font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Nº do Doc. Anterior
+                    </label>
+                    <input
+                      type="text"
+                      value={numDocAntigo}
+                      onChange={(e) => setNumDocAntigo(e.target.value.toUpperCase())}
+                      placeholder="Ex: DI-1029, LE-112"
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-900 font-mono font-semibold uppercase"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Próximo Processo (PROCESSO SEGUINTE)
+                    </label>
+                    <input
+                      type="text"
+                      value={processoSeguinte}
+                      onChange={(e) => setProcessoSeguinte(e.target.value.toUpperCase())}
+                      placeholder="Ex: 2394"
+                      className="w-full px-3 py-1.5 text-xs bg-blue-50/50 border border-blue-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-blue-950 font-mono font-bold"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Seção 3: Proprietário / Responsável Legal e Síndico */}

@@ -35,7 +35,9 @@ export interface BilheteItem {
   tipoDetalhe?: 'BILHETE' | 'RETORNO';
   rotulo: string; // Ex: '1º Bilhete (Data do Bilhete)', 'Último Bilhete', 'Bilhete Intermediário'
   data?: string; // DD/MM/AAAA ou DD/MM
+  dataBilheteOrigem?: string; // Data original do bilhete quando convertido para RETORNO
   dias?: string | number; // Dias decorridos
+  autoContagemDias?: boolean; // Contagem automática a partir da data de registro
   statusOuParecer?: string; // Ex: 'GERADO DI', 'FINALIZADO'
   despacho?: string;
   autor?: string;

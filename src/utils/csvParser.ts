@@ -459,19 +459,6 @@ export function convertRowsToNotifications(
     const rawEntrada = rawEntradaSST || rawEntradaOBM;
     const dataEntradaFormatada = rawEntrada ? formatDateBR(rawEntrada) : '';
 
-    // Consolidated legal deadline calculation
-    const prazoCalc = calcularPrazoProcesso({
-      dataEntrada: dataEntradaFormatada || undefined,
-      tipoProcesso: rawTipo || undefined,
-      status: rawSituacao || undefined,
-      detalhesSST: {
-        entradaSST: rawEntradaSST || undefined,
-        dataPronto: rawDataPronto || undefined,
-      },
-    });
-
-    const dataTramiteFormatada = prazoCalc.dataLimiteBR !== '-' ? prazoCalc.dataLimiteBR : null;
-
     // Status
     const statusFinal: StatusType = (rawSituacao || 'EM ANÁLISE') as StatusType;
 
@@ -583,6 +570,14 @@ export function convertRowsToNotifications(
       noGeral: rawNoGeral || '',
       localizacao: rawLocalizacao || '',
     };
+
+    const prazoCalc = calcularPrazoProcesso({
+      dataEntrada: dataEntradaFormatada || undefined,
+      tipoProcesso: rawTipo || undefined,
+      status: rawSituacao || undefined,
+      detalhesSST: sstDetails,
+    });
+    const dataTramiteFormatada = prazoCalc.dataLimiteBR !== '-' ? prazoCalc.dataLimiteBR : null;
 
     // Histórico de auditoria real
     const historicoInicial: any[] = [];

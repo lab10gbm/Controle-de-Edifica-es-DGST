@@ -388,9 +388,9 @@ export type FiscalizacaoStatisticalMatrixResult = GenericStatisticalMatrixResult
   FiscalizacaoReportCategory
 >;
 
-export function parseBrOrIsoMonthYear(
+export function parseBrOrIsoFullDate(
   rawDate?: string
-): { month: number; year: number } | null {
+): { day: number; month: number; year: number; sortKey: string } | null {
   const clean = String(rawDate || '').trim();
   if (!clean || clean === '-' || clean === '00/00/0000' || clean === '0000-00-00') {
     return null;
@@ -400,7 +400,15 @@ export function parseBrOrIsoMonthYear(
   if (isoMatch) {
     const year = parseInt(isoMatch[1], 10);
     const month = parseInt(isoMatch[2], 10);
-    if (year > 1900 && month >= 1 && month <= 12) return { month, year };
+    const day = parseInt(isoMatch[3], 10);
+    if (year > 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return {
+        day,
+        month,
+        year,
+        sortKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      };
+    }
   }
 
   const brMatch = clean.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
@@ -410,11 +418,23 @@ export function parseBrOrIsoMonthYear(
     let year = parseInt(brMatch[3], 10);
     if (year < 100) year += 2000;
     if (day >= 1 && day <= 31 && year > 1900 && month >= 1 && month <= 12) {
-      return { month, year };
+      return {
+        day,
+        month,
+        year,
+        sortKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      };
     }
   }
 
   return null;
+}
+
+export function parseBrOrIsoMonthYear(
+  rawDate?: string
+): { month: number; year: number } | null {
+  const parsed = parseBrOrIsoFullDate(rawDate);
+  return parsed ? { month: parsed.month, year: parsed.year } : null;
 }
 
 export function classifyFiscalizacaoStatus(
@@ -457,7 +477,7 @@ export function classifyFiscalizacaoAto(
   if (norm.includes('INTERDIC') || norm.includes('TAC')) {
     return 'INTERDIÇÃO / TAC';
   }
-  if (norm.includes('ENCERRAD') || norm.includes('CANCEL') || norm.includes('ARQUIV')) {
+  if (norm.includes('ENCERRAD') || norm.includes('ENCERRAM') || norm.includes('CANCEL') || norm.includes('ARQUIV')) {
     return 'ENCERRADO / CANCELADO';
   }
   if (norm.includes('NOTIFIC')) {
@@ -475,6 +495,63 @@ export function extractFiscalizacaoExpedicaoMonthYear(
   for (const ato of record.historicoAtos || []) {
     const parsed = parseBrOrIsoMonthYear(ato.data);
     if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a data correspondente à situação atual da fiscalização:
+ * prioriza o ato mais recente compatível com o status atual (ex.: 1º Auto lavrado em outubro
+ * de uma notificação aberta em maio deve ser contabilizado em outubro, nunca em maio).
+ */
+export function extractFiscalizacaoStatusMonthYear(
+  record: FiscalizacaoRecord
+): { month: number; year: number } | null {
+  const targetCategory = classifyFiscalizacaoStatus(record.status);
+  const datedAtos = (record.historicoAtos || [])
+    .map((ato, idx) => ({
+      idx,
+      parsed: parseBrOrIsoFullDate(ato.data),
+      category: classifyFiscalizacaoAto(ato.tipoAto, record.status),
+    }))
+    .filter(
+      (entry): entry is {
+        idx: number;
+        parsed: { day: number; month: number; year: number; sortKey: string };
+        category: FiscalizacaoReportCategory;
+      } => Boolean(entry.parsed)
+    );
+
+  const matchingAtos = datedAtos.filter((entry) => entry.category === targetCategory);
+  if (matchingAtos.length > 0) {
+    matchingAtos.sort((a, b) => {
+      if (a.parsed.sortKey !== b.parsed.sortKey) {
+        return b.parsed.sortKey.localeCompare(a.parsed.sortKey);
+      }
+      return b.idx - a.idx;
+    });
+    const best = matchingAtos[0].parsed;
+    return { month: best.month, year: best.year };
+  }
+
+  const expParsed = parseBrOrIsoFullDate(record.dataExpedicao);
+  if (datedAtos.length > 0) {
+    const latestAto = [...datedAtos].sort((a, b) => {
+      if (a.parsed.sortKey !== b.parsed.sortKey) {
+        return b.parsed.sortKey.localeCompare(a.parsed.sortKey);
+      }
+      return b.idx - a.idx;
+    })[0].parsed;
+
+    if (expParsed && expParsed.sortKey > latestAto.sortKey) {
+      return { month: expParsed.month, year: expParsed.year };
+    }
+    return { month: latestAto.month, year: latestAto.year };
+  }
+
+  if (expParsed) {
+    return { month: expParsed.month, year: expParsed.year };
   }
 
   return null;
@@ -550,25 +627,57 @@ export function buildFiscalizacaoStatisticalMatrix(
     }
 
     if (dateBasis === 'expedicao') {
-      const my = extractFiscalizacaoExpedicaoMonthYear(rec);
+      const my = extractFiscalizacaoStatusMonthYear(rec);
       if (!my || my.year !== targetYear || !months.includes(my.month)) continue;
       const category = classifyFiscalizacaoStatus(rec.status);
       registerOccurrence(category, my.month, rec);
     } else {
       const atos = rec.historicoAtos || [];
       if (atos.length === 0) {
-        const my = extractFiscalizacaoExpedicaoMonthYear(rec);
+        const my = extractFiscalizacaoStatusMonthYear(rec);
         if (my && my.year === targetYear && months.includes(my.month)) {
           registerOccurrence(classifyFiscalizacaoStatus(rec.status), my.month, rec);
         }
         continue;
       }
 
+      let maxAtoSortKey = '';
+      let hasClosedAto = false;
+      const seenAtosInRecord = new Set<string>();
+
       for (const ato of atos) {
-        const my = parseBrOrIsoMonthYear(ato.data);
-        if (!my || my.year !== targetYear || !months.includes(my.month)) continue;
+        const parsed = parseBrOrIsoFullDate(ato.data);
         const category = classifyFiscalizacaoAto(ato.tipoAto, rec.status);
-        registerOccurrence(category, my.month, rec);
+        if (category === 'ENCERRADO / CANCELADO') {
+          hasClosedAto = true;
+        }
+        if (!parsed) continue;
+        if (parsed.sortKey > maxAtoSortKey) {
+          maxAtoSortKey = parsed.sortKey;
+        }
+        if (parsed.year !== targetYear || !months.includes(parsed.month)) continue;
+
+        const atoNumNorm = (ato.numeroAto || '').trim().toUpperCase();
+        const dedupeKey = `${parsed.sortKey}::${category}::${atoNumNorm}`;
+        if (seenAtosInRecord.has(dedupeKey)) continue;
+        seenAtosInRecord.add(dedupeKey);
+
+        registerOccurrence(category, parsed.month, rec);
+      }
+
+      if (
+        (rec.status === 'Encerrado' || rec.status === 'Cancelado') &&
+        !hasClosedAto
+      ) {
+        const expParsed = parseBrOrIsoFullDate(rec.dataExpedicao);
+        if (
+          expParsed &&
+          (!maxAtoSortKey || expParsed.sortKey > maxAtoSortKey) &&
+          expParsed.year === targetYear &&
+          months.includes(expParsed.month)
+        ) {
+          registerOccurrence('ENCERRADO / CANCELADO', expParsed.month, rec);
+        }
       }
     }
   }

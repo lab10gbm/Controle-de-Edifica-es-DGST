@@ -11,7 +11,9 @@ import {
   formatCpfCnpj,
   isExpired, 
   getDaysRemaining,
+  adicionarDiasAData,
   calcularPrazoProcesso,
+  calcularDiasDecorridosBilhete,
   deriveListaBilhetes,
   buildDetalhesSSTWithBilhetes
 } from '../utils/helpers';
@@ -78,12 +80,22 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const [isDeletingBilhete, setIsDeletingBilhete] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // States para cadastro de novo bilhete (presente e futuro)
+  const getNextNumeroForTipo = (tipo: 'BILHETE' | 'RETORNO', lista: BilheteItem[]): string => {
+    const count = lista.filter((item) => {
+      if (tipo === 'RETORNO') {
+        return item.tipoDetalhe === 'RETORNO' || item.tipo === 'ultimo' || /retorno/i.test(item.rotulo || '');
+      }
+      return item.tipoDetalhe === 'BILHETE' || (!item.tipoDetalhe && item.tipo !== 'ultimo' && !/retorno/i.test(item.rotulo || ''));
+    }).length;
+    return String(count + 1);
+  };
+
+  // States para cadastro e edição de bilhete (presente e futuro)
   const [isAddingBilhete, setIsAddingBilhete] = useState(false);
+  const [editingBilheteTarget, setEditingBilheteTarget] = useState<{ bilhete: BilheteItem; index: number } | null>(null);
   const [novoDetalheTipo, setNovoDetalheTipo] = useState<'BILHETE' | 'RETORNO'>('BILHETE');
+  const [novoBilheteNumero, setNovoBilheteNumero] = useState<string>('');
   const [novoBilheteData, setNovoBilheteData] = useState(() => new Date().toLocaleDateString('pt-BR'));
-  const [novoBilheteDias, setNovoBilheteDias] = useState<string>('0');
-  const [novoBilheteStatus, setNovoBilheteStatus] = useState<string>('EM ANÁLISE');
   const [novoBilheteAutor, setNovoBilheteAutor] = useState<string>(
     () => notification.fiscalResponsavel?.trim() || 'Fiscal SST 10º GBM'
   );
@@ -92,14 +104,25 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
   const sst = notification.detalhesSST || {};
   const prazoInfo = calcularPrazoProcesso(notification);
 
-  // Formatações precisas dos bilhetes
-  const dataBilheteFmt = formatDateBR(sst.dataBilhete || sst.bilhetes);
-  const ultimoBilheteFmt = formatDateBR(sst.ultimoBilhete);
-  const diasBilheteVal = sst.diasBilhetes !== undefined && sst.diasBilhetes !== '' ? sst.diasBilhetes : (sst.diasBilhete ?? 0);
-  const diasUltimoBilheteVal = sst.diasUltimoBilhete !== undefined && sst.diasUltimoBilhete !== '' ? sst.diasUltimoBilhete : 0;
-  const outrosBilhetesVal = sst.outrosBilhetes || '';
+  const listaBilhetes: BilheteItem[] = deriveListaBilhetes(notification.id, sst).map((b) =>
+    b.autoContagemDias
+      ? { ...b, dias: calcularDiasDecorridosBilhete(b.data, sst.dataPronto) }
+      : b
+  );
+  const primeiroBilhete = listaBilhetes[0];
+  const retornoItems = listaBilhetes.filter((b) => b.tipo === 'ultimo' || b.tipoDetalhe === 'RETORNO');
+  const ultimoBilheteItem = retornoItems.length > 0 ? retornoItems[retornoItems.length - 1] : undefined;
 
-  const listaBilhetes: BilheteItem[] = deriveListaBilhetes(notification.id, sst);
+  // Formatações precisas dos bilhetes
+  const dataBilheteFmt = formatDateBR(sst.dataBilhete || sst.bilhetes || primeiroBilhete?.data);
+  const ultimoBilheteFmt = formatDateBR(sst.ultimoBilhete || ultimoBilheteItem?.data);
+  const diasBilheteVal = primeiroBilhete?.autoContagemDias
+    ? (primeiroBilhete.dias ?? 0)
+    : (sst.diasBilhetes !== undefined && sst.diasBilhetes !== '' ? sst.diasBilhetes : (sst.diasBilhete ?? 0));
+  const diasUltimoBilheteVal = ultimoBilheteItem?.autoContagemDias
+    ? (ultimoBilheteItem.dias ?? 0)
+    : (sst.diasUltimoBilhete !== undefined && sst.diasUltimoBilhete !== '' ? sst.diasUltimoBilhete : 0);
+  const outrosBilhetesVal = sst.outrosBilhetes || '';
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -149,8 +172,18 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
           ? (nextLista[nextLista.length - 1]?.statusOuParecer || '')
           : sst.outrosBilhetes;
       const updatedSST = buildDetalhesSSTWithBilhetes(sst, nextLista, nextOutros);
+      const nextPrazo = calcularPrazoProcesso({
+        ...notification,
+        detalhesSST: updatedSST,
+      });
+      const nextDeadline =
+        nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-'
+          ? nextPrazo.dataLimiteBR
+          : notification.dataValidade;
       await onUpdateNotification({
         ...notification,
+        dataValidade: nextDeadline,
+        dataTramite: nextDeadline,
         detalhesSST: updatedSST,
         atualizadoEm: new Date().toISOString(),
       });
@@ -160,51 +193,162 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     }
   };
 
+  const handleStartEditBilhete = (bilhete: BilheteItem, index: number) => {
+    const tipoDetectado: 'BILHETE' | 'RETORNO' =
+      bilhete.tipoDetalhe === 'RETORNO' ||
+      bilhete.tipo === 'ultimo' ||
+      /retorno/i.test(bilhete.rotulo || '')
+        ? 'RETORNO'
+        : 'BILHETE';
+
+    const rotuloTrim = (bilhete.rotulo || '').trim();
+    const matchNum =
+      rotuloTrim.match(/^(?:Bilhete|Retorno)\s+([A-Z0-9-]+)$/i)?.[1] ||
+      rotuloTrim.match(/^(\d+)º/)?.[1] ||
+      String(index + 1);
+
+    setEditingBilheteTarget({ bilhete, index });
+    setNovoDetalheTipo(tipoDetectado);
+    setNovoBilheteNumero(matchNum.toUpperCase());
+    setNovoBilheteData(
+      bilhete.data ? formatDateBR(bilhete.data) : new Date().toLocaleDateString('pt-BR')
+    );
+
+    setNovoBilheteAutor(
+      bilhete.autor?.trim() || notification.fiscalResponsavel?.trim() || 'Fiscal SST 10º GBM'
+    );
+    setNovoBilheteDespacho(bilhete.despacho || '');
+    setIsAddingBilhete(true);
+  };
+
   const handleSaveNovoBilhete = (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoBilheteData.trim()) return;
 
     const dataFormatada = formatDateBR(novoBilheteData.trim());
+    const diasCalculados = calcularDiasDecorridosBilhete(dataFormatada, sst.dataPronto);
     const proximoNumero = listaBilhetes.length + 1;
-    const detalheRotulo = novoDetalheTipo === 'RETORNO' ? `Retorno ${proximoNumero}B` : `Bilhete ${proximoNumero}`;
+    const numeroFinal = novoBilheteNumero.trim() || getNextNumeroForTipo(novoDetalheTipo, listaBilhetes);
+    const detalheRotulo = novoDetalheTipo === 'RETORNO' ? `Retorno ${numeroFinal}` : `Bilhete ${numeroFinal}`;
+    const parecerFinal = `${novoDetalheTipo} ${numeroFinal}`.toUpperCase();
     const autorRegistro = novoBilheteAutor.trim() || 'Fiscal SST 10º GBM';
+
+    if (editingBilheteTarget) {
+      const targetIdx = editingBilheteTarget.index;
+      const oldItem = editingBilheteTarget.bilhete;
+      const oldWasBilhete =
+        oldItem.tipoDetalhe === 'BILHETE' ||
+        (oldItem.tipoDetalhe !== 'RETORNO' &&
+          oldItem.tipo !== 'ultimo' &&
+          !/retorno/i.test(oldItem.rotulo || '') &&
+          !/retorno/i.test(oldItem.statusOuParecer || ''));
+      const preservedOrigem =
+        novoDetalheTipo === 'RETORNO'
+          ? oldItem.dataBilheteOrigem || (oldWasBilhete && oldItem.data ? formatDateBR(oldItem.data) : undefined)
+          : undefined;
+      const { dataBilheteOrigem: _ignoredOrigem, ...oldItemWithoutOrigem } = oldItem;
+
+      const updatedItem: BilheteItem = {
+        ...oldItemWithoutOrigem,
+        tipo: novoDetalheTipo === 'RETORNO' ? 'ultimo' : oldItem.tipo === 'primeiro' ? 'primeiro' : 'intermediario',
+        tipoDetalhe: novoDetalheTipo,
+        rotulo: detalheRotulo,
+        data: dataFormatada,
+        ...(preservedOrigem ? { dataBilheteOrigem: preservedOrigem } : {}),
+        dias: String(diasCalculados),
+        autoContagemDias: true,
+        statusOuParecer: parecerFinal,
+        despacho: novoBilheteDespacho.trim() || `${detalheRotulo} atualizado por ${autorRegistro}.`,
+        autor: autorRegistro,
+      };
+
+      const novaLista = listaBilhetes.map((item, idx) =>
+        idx === targetIdx ? updatedItem : item
+      );
+
+      const shouldUpdateOutros =
+        targetIdx === novaLista.length - 1 ||
+        novoDetalheTipo === 'RETORNO' ||
+        (sst.outrosBilhetes || '').trim() === (oldItem.statusOuParecer || '').trim();
+      const nextOutros = shouldUpdateOutros ? parecerFinal : sst.outrosBilhetes;
+      const updatedSST = buildDetalhesSSTWithBilhetes(sst, novaLista, nextOutros);
+      const nextPrazo = calcularPrazoProcesso({
+        ...notification,
+        detalhesSST: updatedSST,
+      });
+      const nextDeadline =
+        nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-'
+          ? nextPrazo.dataLimiteBR
+          : notification.dataValidade;
+
+      const editLog: AuditLog = {
+        id: `log-b-edit-${Date.now()}`,
+        data: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+        autor: autorRegistro,
+        acao: `${detalheRotulo} Editado`,
+        detalhes: `${detalheRotulo} atualizado para ${dataFormatada} (${diasCalculados} dia(s) decorrido(s)). Situação: ${parecerFinal}.${nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-' ? ` Prazo limite: ${nextPrazo.dataLimiteBR}.` : ''} ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
+      };
+
+      if (onUpdateNotification) {
+        onUpdateNotification({
+          ...notification,
+          dataValidade: nextDeadline,
+          dataTramite: nextDeadline,
+          detalhesSST: updatedSST,
+          historico: [editLog, ...(notification.historico || [])],
+          atualizadoEm: new Date().toISOString(),
+        });
+      }
+
+      setIsAddingBilhete(false);
+      setEditingBilheteTarget(null);
+      setNovoBilheteNumero('');
+      setNovoBilheteDespacho('');
+      return;
+    }
 
     const novoItem: BilheteItem = {
       id: `b-manual-${Date.now()}`,
       ordem: proximoNumero,
-      tipo: novoDetalheTipo === 'RETORNO' ? 'ultimo' : 'intermediario',
+      tipo: novoDetalheTipo === 'RETORNO' ? 'ultimo' : proximoNumero === 1 ? 'primeiro' : 'intermediario',
       tipoDetalhe: novoDetalheTipo,
       rotulo: detalheRotulo,
       data: dataFormatada,
-      dias: novoBilheteDias.trim() || '0',
-      statusOuParecer: novoBilheteStatus.trim() || 'Registrado',
-      despacho: novoBilheteDespacho.trim() || `Bilhete registrado por ${autorRegistro}.`,
+      dias: String(diasCalculados),
+      autoContagemDias: true,
+      statusOuParecer: parecerFinal,
+      despacho: novoBilheteDespacho.trim() || `${detalheRotulo} registrado por ${autorRegistro}.`,
       autor: autorRegistro,
     };
 
     const novaLista = [...listaBilhetes, novoItem];
-
-    const updatedSST = {
-      ...sst,
-      listaBilhetes: novaLista,
-      ...(novoDetalheTipo === 'RETORNO' ? {
-        ultimoBilhete: dataFormatada,
-        diasUltimoBilhete: novoBilheteDias.trim() || '0',
-      } : {}),
-      outrosBilhetes: novoBilheteStatus.trim() || sst.outrosBilhetes,
-    };
+    const updatedSST = buildDetalhesSSTWithBilhetes(
+      sst,
+      novaLista,
+      parecerFinal || sst.outrosBilhetes
+    );
+    const nextPrazo = calcularPrazoProcesso({
+      ...notification,
+      detalhesSST: updatedSST,
+    });
+    const nextDeadline =
+      nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-'
+        ? nextPrazo.dataLimiteBR
+        : notification.dataValidade;
 
     const newLog: AuditLog = {
       id: `log-b-${Date.now()}`,
       data: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
       autor: autorRegistro,
-      acao: novoDetalheTipo === 'RETORNO' ? 'Atualização de Retorno' : 'Registro de Bilhete',
-      detalhes: `${novoDetalheTipo === 'RETORNO' ? 'Retorno' : 'Bilhete'} registrado em ${dataFormatada} (${novoBilheteDias} dias decorridos). Situação: ${novoBilheteStatus}. ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
+      acao: `${detalheRotulo} Registrado`,
+      detalhes: `${detalheRotulo} registrado em ${dataFormatada} (${diasCalculados} dia(s) decorrido(s)). Situação: ${parecerFinal}.${nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-' ? ` Prazo limite: ${nextPrazo.dataLimiteBR}.` : ''} ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
     };
 
     if (onUpdateNotification) {
       onUpdateNotification({
         ...notification,
+        dataValidade: nextDeadline,
+        dataTramite: nextDeadline,
         detalhesSST: updatedSST,
         historico: [newLog, ...(notification.historico || [])],
         atualizadoEm: new Date().toISOString(),
@@ -212,12 +356,14 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     } else {
       onAddQuickNote(
         notification.id,
-        `${novoDetalheTipo === 'RETORNO' ? 'Retorno' : 'Bilhete'} registrado (${dataFormatada}, ${novoBilheteDias} dias decorridos): ${novoBilheteStatus}. ${novoBilheteDespacho}`,
+        `${detalheRotulo} registrado (${dataFormatada}, ${diasCalculados} dia(s) decorrido(s)): ${parecerFinal}. ${novoBilheteDespacho}`,
         autorRegistro
       );
     }
 
     setIsAddingBilhete(false);
+    setEditingBilheteTarget(null);
+    setNovoBilheteNumero('');
     setNovoBilheteDespacho('');
   };
 
@@ -264,18 +410,33 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
             ) : prazoInfo.isVencido ? (
               <span
                 className="inline-flex items-center gap-1 text-rose-800 bg-rose-100 px-2.5 py-0.5 rounded font-bold border border-rose-200"
-                title={`Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Limite: ${prazoInfo.dataLimiteBR}`}
+                title={
+                  prazoInfo.prazoBilheteAtivo
+                    ? `${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias = Limite: ${prazoInfo.dataLimiteBR}`
+                    : `Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Limite: ${prazoInfo.dataLimiteBR}`
+                }
               >
                 <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
                 Prazo Vencido ({prazoInfo.diasEmAtraso} dia(s) em atraso) · Limite: {prazoInfo.dataLimiteBR}
+                {prazoInfo.prazoBilheteAtivo ? ` (${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} +15d)` : ''}
               </span>
             ) : (
               <span
                 className="inline-flex items-center gap-1 text-blue-800 bg-blue-100 px-2.5 py-0.5 rounded font-medium border border-blue-200"
-                title={`Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Limite: ${prazoInfo.dataLimiteBR}`}
+                title={
+                  prazoInfo.prazoBilheteAtivo
+                    ? `${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias = Limite: ${prazoInfo.dataLimiteBR}`
+                    : `Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Limite: ${prazoInfo.dataLimiteBR}`
+                }
               >
                 <Clock className="w-3.5 h-3.5 text-blue-600" />
-                No Prazo ({prazoInfo.diasRestantes} dias restantes) · Limite: {prazoInfo.dataLimiteBR} ({prazoInfo.diasPrazo} dias)
+                No Prazo ({prazoInfo.diasRestantes} dias restantes) · Limite: {prazoInfo.dataLimiteBR} (
+                {prazoInfo.prazoBilheteAtivo
+                  ? `${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} +15d`
+                  : prazoInfo.diasBonusBilhetes > 0
+                  ? `${prazoInfo.diasPrazo}d + ${prazoInfo.diasBonusBilhetes}d`
+                  : `${prazoInfo.diasPrazo} dias`}
+                )
               </span>
             )}
           </div>
@@ -713,7 +874,13 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 <div className="flex items-baseline gap-1.5 mt-0.5">
                   <span className="text-sm font-bold font-mono text-indigo-900">{prazoInfo.dataLimiteBR}</span>
                 </div>
-                <span className="text-[10px] text-slate-400 block mt-0.5">Entrada + {prazoInfo.diasPrazo} dias</span>
+                <span className="text-[10px] text-slate-500 block mt-0.5">
+                  {prazoInfo.prazoBilheteAtivo
+                    ? `${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias`
+                    : prazoInfo.diasBonusBilhetes > 0
+                    ? `Entrada + ${prazoInfo.diasPrazo}d (+${prazoInfo.diasBonusBilhetes}d retorno)`
+                    : `Entrada + ${prazoInfo.diasPrazo} dias`}
+                </span>
               </div>
 
               <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
@@ -1117,7 +1284,18 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsAddingBilhete((prev) => !prev)}
+                  onClick={() => {
+                    if (isAddingBilhete) {
+                      setIsAddingBilhete(false);
+                      setEditingBilheteTarget(null);
+                    } else {
+                      setEditingBilheteTarget(null);
+                      setNovoBilheteNumero(getNextNumeroForTipo(novoDetalheTipo, listaBilhetes));
+                      setNovoBilheteData(new Date().toLocaleDateString('pt-BR'));
+                      setNovoBilheteDespacho('');
+                      setIsAddingBilhete(true);
+                    }
+                  }}
                   className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -1130,22 +1308,46 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   <div className="flex items-center justify-between border-b border-blue-200/60 pb-1.5">
                     <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
                       <FileText className="w-3.5 h-3.5 text-blue-700" />
-                      <span>Cadastrar Novo Bilhete / Despacho no Processo</span>
+                      <span>
+                        {editingBilheteTarget
+                          ? `Editar Bilhete / Despacho (${editingBilheteTarget.bilhete.rotulo || `#${editingBilheteTarget.index + 1}`})`
+                          : 'Cadastrar Novo Bilhete / Despacho no Processo'}
+                      </span>
                     </span>
-                    <span className="text-[10px] text-blue-700 font-medium">Permite múltiplos bilhetes intermediários</span>
+                    <span className="text-[10px] text-blue-700 font-medium">
+                      {novoDetalheTipo === 'BILHETE'
+                        ? `Prazo +15d: ${adicionarDiasAData(novoBilheteData, 15).dataBR} · ${calcularDiasDecorridosBilhete(novoBilheteData, sst.dataPronto)}d decorrido(s)`
+                        : `Continuidade do prazo na data do retorno · ${calcularDiasDecorridosBilhete(novoBilheteData, sst.dataPronto)}d decorrido(s)`}
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Tipo de Detalhe</label>
-                      <select
-                        value={novoDetalheTipo}
-                        onChange={(e) => setNovoDetalheTipo(e.target.value as 'BILHETE' | 'RETORNO')}
-                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
-                      >
-                        <option value="BILHETE">Bilhete</option>
-                        <option value="RETORNO">Retorno</option>
-                      </select>
+                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Tipo de Detalhe e Nº</label>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={novoDetalheTipo}
+                          onChange={(e) => {
+                            const nextTipo = e.target.value as 'BILHETE' | 'RETORNO';
+                            setNovoDetalheTipo(nextTipo);
+                            setNovoBilheteNumero(getNextNumeroForTipo(nextTipo, listaBilhetes));
+                          }}
+                          className="min-w-0 flex-1 px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                        >
+                          <option value="BILHETE">Bilhete</option>
+                          <option value="RETORNO">Retorno</option>
+                        </select>
+                        <input
+                          type="text"
+                          maxLength={10}
+                          value={novoBilheteNumero}
+                          onChange={(e) => setNovoBilheteNumero(e.target.value.toUpperCase())}
+                          placeholder={getNextNumeroForTipo(novoDetalheTipo, listaBilhetes)}
+                          aria-label="Número do Bilhete ou Retorno"
+                          title="Número do Bilhete ou Retorno (ex: 1, 2, 2B)"
+                          className="w-14 px-1.5 py-1.5 bg-white border border-slate-300 rounded text-center font-mono font-bold text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-600 shrink-0"
+                        />
+                      </div>
                     </div>
 
                     <div>
@@ -1157,28 +1359,6 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                         placeholder="Ex: 05/01/2026 ou 05/01"
                         className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-600"
                         required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Dias Decorridos</label>
-                      <input
-                        type="number"
-                        value={novoBilheteDias}
-                        onChange={(e) => setNovoBilheteDias(e.target.value)}
-                        min={0}
-                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-600"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-semibold text-slate-700 block mb-1">Parecer / Status</label>
-                      <input
-                        type="text"
-                        value={novoBilheteStatus}
-                        onChange={(e) => setNovoBilheteStatus(e.target.value)}
-                        placeholder="Ex: GERADO DI, FINALIZADO"
-                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600"
                       />
                     </div>
 
@@ -1218,7 +1398,10 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   <div className="flex justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setIsAddingBilhete(false)}
+                      onClick={() => {
+                        setIsAddingBilhete(false);
+                        setEditingBilheteTarget(null);
+                      }}
                       className="px-3 py-1 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-white border border-slate-300 rounded cursor-pointer"
                     >
                       Cancelar
@@ -1228,7 +1411,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                       className="px-3.5 py-1 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>Salvar Bilhete no Processo</span>
+                      <span>{editingBilheteTarget ? 'Salvar Alterações' : 'Salvar Bilhete no Processo'}</span>
                     </button>
                   </div>
                 </form>
@@ -1242,10 +1425,9 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                       <th className="py-2 px-3 w-48">Identificação do Bilhete</th>
                       <th className="py-2 px-3 w-36">Data do Bilhete</th>
                       <th className="py-2 px-3 w-28 text-center">Dias Decorridos</th>
-                      <th className="py-2 px-3 w-40">Parecer / Situação</th>
                       <th className="py-2 px-3">Despacho / Detalhes</th>
                       {onUpdateNotification && (
-                        <th className="py-2 px-3 w-16 text-center">Ações</th>
+                        <th className="py-2 px-3 w-20 text-center">Ações</th>
                       )}
                     </tr>
                   </thead>
@@ -1256,39 +1438,78 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                           {bIdx + 1}
                         </td>
                         <td className="py-2 px-3">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`inline-block w-2 h-2 rounded-full ${
-                              bilhete.tipoDetalhe === 'RETORNO' ? 'bg-indigo-600' : bilhete.tipo === 'ultimo' ? 'bg-indigo-600' : 'bg-purple-600'
-                            }`} />
-                            <strong className="text-slate-900 font-semibold">
-                              {bilhete.rotulo || (bIdx === 0 ? '1º Bilhete (Data do Bilhete)' : 'Último Bilhete')}
-                            </strong>
-                          </div>
+                          {(() => {
+                            const rotuloRaw = (bilhete.rotulo || (bIdx === 0 ? 'BILHETE 1' : 'Último Bilhete')).trim();
+                            const statusRaw = (bilhete.statusOuParecer || '').trim();
+                            const isGenericRotulo =
+                              /^1º Bilhete/i.test(rotuloRaw) || /^Último Bilhete/i.test(rotuloRaw);
+                            const badgeText =
+                              statusRaw && (isGenericRotulo || statusRaw.toUpperCase() === rotuloRaw.toUpperCase())
+                                ? statusRaw
+                                : rotuloRaw.toUpperCase();
+                            const badgeUpper = badgeText.toUpperCase();
+                            const badgeClasses =
+                              badgeUpper === 'BILHETE 1'
+                                ? 'text-blue-900 bg-blue-50 border-blue-200 font-bold'
+                                : badgeUpper.startsWith('BILHETE')
+                                ? 'text-purple-900 bg-purple-50 border-purple-200 font-bold'
+                                : badgeUpper === 'GERADO DI'
+                                ? 'text-red-900 bg-red-50 border-red-200 font-bold'
+                                : badgeUpper === 'FINALIZADO'
+                                ? 'text-slate-800 bg-slate-100 border-slate-300 font-bold'
+                                : badgeUpper.includes('RETORNO')
+                                ? 'text-amber-900 bg-amber-50 border-amber-200 font-bold'
+                                : 'text-slate-800 bg-slate-50 border-slate-200';
+                            const showSubStatus =
+                              statusRaw &&
+                              !isGenericRotulo &&
+                              statusRaw.toUpperCase() !== rotuloRaw.toUpperCase() &&
+                              statusRaw.toUpperCase() !== badgeUpper;
+                            return (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span
+                                  className={`px-2.5 py-0.5 rounded border inline-block text-xs font-semibold ${badgeClasses}`}
+                                  title={rotuloRaw}
+                                >
+                                  {badgeText}
+                                </span>
+                                {showSubStatus && (
+                                  <span className="text-[11px] text-slate-500 font-medium">{statusRaw}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-slate-800">
-                          {bilhete.data ? formatDateBR(bilhete.data) : '-'}
+                          <div>{bilhete.data ? formatDateBR(bilhete.data) : '-'}</div>
+                          {bilhete.dataBilheteOrigem && (
+                            <div className="text-[10px] font-sans font-medium text-amber-700 mt-0.5">
+                              Bilhete orig.: {formatDateBR(bilhete.dataBilheteOrigem)}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2 px-3 text-center">
                           <span className="font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
                             {bilhete.dias ?? 0}d
                           </span>
-                        </td>
-                        <td className="py-2 px-3">
-                          <span className={`px-2.5 py-0.5 rounded border inline-block text-xs font-semibold ${
-                            (bilhete.statusOuParecer || '').toUpperCase() === 'BILHETE 1'
-                              ? 'text-blue-900 bg-blue-50 border-blue-200 font-bold'
-                              : (bilhete.statusOuParecer || '').toUpperCase().startsWith('BILHETE')
-                              ? 'text-purple-900 bg-purple-50 border-purple-200 font-bold'
-                              : (bilhete.statusOuParecer || '').toUpperCase() === 'GERADO DI'
-                              ? 'text-red-900 bg-red-50 border-red-200 font-bold'
-                              : (bilhete.statusOuParecer || '').toUpperCase() === 'FINALIZADO'
-                              ? 'text-slate-800 bg-slate-100 border-slate-300 font-bold'
-                              : (bilhete.statusOuParecer || '').toUpperCase().includes('RETORNO')
-                              ? 'text-amber-900 bg-amber-50 border-amber-200 font-bold'
-                              : 'text-slate-800 bg-slate-50 border-slate-200'
-                          }`}>
-                            {bilhete.statusOuParecer || (bIdx === 0 ? 'BILHETE 1' : 'Registrado')}
-                          </span>
+                          {bIdx === listaBilhetes.length - 1 && prazoInfo.prazoBilheteAtivo && (
+                            <div
+                              className={`text-[10px] font-sans font-semibold mt-0.5 whitespace-nowrap ${
+                                prazoInfo.isVencido
+                                  ? 'text-red-700'
+                                  : prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 5
+                                  ? 'text-orange-700'
+                                  : 'text-purple-700'
+                              }`}
+                              title={`Prazo de 15 dias do bilhete: até ${prazoInfo.dataLimiteBR}`}
+                            >
+                              {prazoInfo.isVencido
+                                ? `Venc. +15d (${prazoInfo.diasEmAtraso}d)`
+                                : prazoInfo.diasRestantes === 0
+                                ? `Limite hoje (${prazoInfo.dataLimiteBR})`
+                                : `Até ${prazoInfo.dataLimiteBR} (${prazoInfo.diasRestantes}d)`}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2 px-3 text-slate-600 text-[11px]">
                           <div>
@@ -1302,22 +1523,33 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                         </td>
                         {onUpdateNotification && (
                           <td className="py-2 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => setDeletingBilheteTarget({ bilhete, index: bIdx })}
-                              title="Excluir bilhete do processo"
-                              aria-label={`Excluir ${bilhete.rotulo || `bilhete ${bIdx + 1}`}`}
-                              className="p-1.5 rounded text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer inline-flex items-center justify-center"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="inline-flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditBilhete(bilhete, bIdx)}
+                                title="Editar bilhete do processo"
+                                aria-label={`Editar ${bilhete.rotulo || `bilhete ${bIdx + 1}`}`}
+                                className="p-1.5 rounded text-slate-400 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer inline-flex items-center justify-center"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeletingBilheteTarget({ bilhete, index: bIdx })}
+                                title="Excluir bilhete do processo"
+                                aria-label={`Excluir ${bilhete.rotulo || `bilhete ${bIdx + 1}`}`}
+                                className="p-1.5 rounded text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer inline-flex items-center justify-center"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
                     ))}
                     {listaBilhetes.length === 0 && (
                       <tr>
-                        <td colSpan={onUpdateNotification ? 7 : 6} className="py-4 text-center text-slate-400 italic">
+                        <td colSpan={onUpdateNotification ? 6 : 5} className="py-4 text-center text-slate-400 italic">
                           Nenhum bilhete registrado para este processo.
                         </td>
                       </tr>
@@ -1344,7 +1576,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                     {(notification.historico || []).map((log, idx) => (
                       <div key={`${log.id}-${idx}`} className="relative group">
                         <div className={`absolute -left-6 top-1 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
-                          log.acao.includes('Último') ? 'bg-indigo-600' : log.acao.includes('1º') || log.acao.includes('Bilhete') ? 'bg-blue-600' : 'bg-slate-400'
+                          log.acao.includes('Último') || log.acao.includes('Retorno') ? 'bg-indigo-600' : log.acao.includes('1º') || log.acao.includes('Bilhete') ? 'bg-blue-600' : 'bg-slate-400'
                         }`} />
                         <div className="flex items-start justify-between gap-2 text-xs">
                           <div className="min-w-0 flex-1">

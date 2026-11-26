@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BuildingNotification } from '../types';
 import { NotificationRow } from './NotificationRow';
 import { calcularPrazoProcesso } from '../utils/helpers';
@@ -113,7 +113,7 @@ const NotificationTableHead: React.FC = () => (
   </thead>
 );
 
-export const NotificationTable: React.FC<NotificationTableProps> = ({
+export const NotificationTable: React.FC<NotificationTableProps> = React.memo(({
   notifications,
   allNotifications,
   onEdit,
@@ -134,6 +134,8 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const highlightTimeoutRef = useRef<number | null>(null);
+  const onEnsureProcessVisibleRef = useRef(onEnsureProcessVisible);
+  onEnsureProcessVisibleRef.current = onEnsureProcessVisible;
 
   useEffect(() => {
     if (!selectedLocalizacao) return;
@@ -159,7 +161,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
     [allNotifications, notifications]
   );
 
-  const handleNavigateToProcess = (target: BuildingNotification) => {
+  const handleNavigateToProcess = useCallback((target: BuildingNotification) => {
     const loc = target.detalhesSST?.localizacao;
     if (isNaturalArchiveLocation(loc)) {
       setIsArchiveExpanded(true);
@@ -169,7 +171,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
       setIsActiveExpanded(true);
     }
 
-    onEnsureProcessVisible?.(target);
+    onEnsureProcessVisibleRef.current?.(target);
 
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -191,7 +193,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 90);
-  };
+  }, []);
 
   const {
     activeNotifications,
@@ -258,7 +260,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
     };
   }, [notifications]);
 
-  const handleToggleExpand = (id: string) => {
+  const handleToggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -268,7 +270,7 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
       }
       return next;
     });
-  };
+  }, []);
 
   const isSectionAllExpanded = (items: BuildingNotification[]) =>
     items.length > 0 && items.every((item) => expandedIds.has(item.id));
@@ -731,4 +733,6 @@ export const NotificationTable: React.FC<NotificationTableProps> = ({
       </section>
     </div>
   );
-};
+});
+
+NotificationTable.displayName = 'NotificationTable';

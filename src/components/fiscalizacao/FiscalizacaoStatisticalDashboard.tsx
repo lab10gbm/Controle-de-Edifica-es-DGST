@@ -112,7 +112,7 @@ export const FiscalizacaoStatisticalDashboard: React.FC<
   const [periodType, setPeriodType] = useState<PeriodType>('quadrimestral');
   const [periodIndex, setPeriodIndex] = useState<number>(1);
   const [reportYear, setReportYear] = useState<number>(currentYearNum);
-  const [dateBasis, setDateBasis] = useState<FiscalizacaoDateBasis>('expedicao');
+  const [dateBasis, setDateBasis] = useState<FiscalizacaoDateBasis>('atos');
   const [municipioFilter, setMunicipioFilter] = useState<string>('');
   const [includeTotalInChart, setIncludeTotalInChart] = useState<boolean>(true);
   const [showBarValues, setShowBarValues] = useState<boolean>(true);
@@ -548,8 +548,8 @@ export const FiscalizacaoStatisticalDashboard: React.FC<
                   }}
                   className="w-full px-2.5 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-600/20 text-slate-800 cursor-pointer"
                 >
-                  <option value="expedicao">Expedição do Registro</option>
-                  <option value="atos">Atos Lavrados no Mês</option>
+                  <option value="atos">Atos Lavrados no Mês (Data de cada ato)</option>
+                  <option value="expedicao">Situação Atual (Data do último ato)</option>
                 </select>
               </div>
 
@@ -876,7 +876,7 @@ export const FiscalizacaoStatisticalDashboard: React.FC<
               </div>
 
               <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500 leading-relaxed">
-                Alterne <strong>Data Considerada</strong> entre <em>Expedição do Registro</em> (situação atual por data de abertura) e <em>Atos Lavrados no Mês</em> (histórico detalhado de notificações e autos emitidos).
+                Alterne <strong>Data Considerada</strong> entre <em>Atos Lavrados no Mês</em> (contabiliza cada notificação, auto ou interdição na data exata em que foi lavrado) e <em>Situação Atual</em> (contabiliza cada registro uma vez na data do ato correspondente à sua situação vigente).
               </div>
             </section>
           </div>
@@ -1140,7 +1140,7 @@ export const FiscalizacaoStatisticalDashboard: React.FC<
                       <th className="py-2 px-3">Nº Anual / Cód.</th>
                       <th className="py-2 px-3">Edificação / Infrator</th>
                       <th className="py-2 px-3">Município</th>
-                      <th className="py-2 px-3">Expedição</th>
+                      <th className="py-2 px-3">Expedição / Atos</th>
                       <th className="py-2 px-3">Situação Atual</th>
                       <th className="py-2 px-3">Processo Vinculado</th>
                       <th className="py-2 px-3 text-center">Ação</th>
@@ -1149,6 +1149,10 @@ export const FiscalizacaoStatisticalDashboard: React.FC<
                   <tbody className="divide-y divide-slate-100">
                     {drilldownRecords.map((rec) => {
                       const annualNo = annualNumberMap.get(rec.id);
+                      const lastAto =
+                        rec.historicoAtos && rec.historicoAtos.length > 0
+                          ? rec.historicoAtos[rec.historicoAtos.length - 1]
+                          : null;
                       return (
                         <tr key={rec.id} className="hover:bg-slate-50">
                           <td className="py-2 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
@@ -1164,7 +1168,12 @@ export const FiscalizacaoStatisticalDashboard: React.FC<
                             {rec.municipio || '—'}
                           </td>
                           <td className="py-2 px-3 font-mono text-slate-700 whitespace-nowrap">
-                            {rec.dataExpedicao || '—'}
+                            <div>{rec.dataExpedicao || '—'}</div>
+                            {lastAto?.data && lastAto.data !== rec.dataExpedicao && (
+                              <div className="text-[11px] text-amber-800 font-semibold">
+                                Último ato: {lastAto.data}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2 px-3 font-semibold text-slate-700 whitespace-nowrap">
                             {rec.status}
