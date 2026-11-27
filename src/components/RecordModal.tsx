@@ -6,7 +6,7 @@ import {
   BilheteItem
 } from '../types';
 import { OBM_LIST, STATUS_LIST, LOCALIZACAO_LIST, TIPOS_PROCESSO_LIST } from '../data/initialData';
-import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST, deriveListaBilhetes, buildDetalhesSSTWithBilhetes, calcularPrazoProcesso } from '../utils/helpers';
+import { getTodayISO, getDiasPrazoPorTipo, adicionarDiasAData, formatDateBR, formatCpfCnpj, PRAZOS_POR_TIPO, parseProcessoE27, extractProcessoNumero, CODIGOS_PROCESSO_LIST, getCodigoPorTipo, getTipoPorCodigo, getDescricaoCodigoSST, deriveListaBilhetes, buildDetalhesSSTWithBilhetes, calcularPrazoProcesso, LIMITE_MAX_BILHETES_PROCESSO } from '../utils/helpers';
 import { cleanProcessLinkValue } from '../utils/processLinks';
 import { 
   X, 
@@ -125,7 +125,7 @@ function buildInitialModalState(
 ): RecordModalInitialState {
   const hojeISO = getTodayISO();
   if (!editingRecord) {
-    const prazoInicial = adicionarDiasAData(hojeISO, getDiasPrazoPorTipo('CERTIFICADO DE APROVAÇÃO'));
+    const prazoInicial = adicionarDiasAData(hojeISO, Math.max(0, getDiasPrazoPorTipo('CERTIFICADO DE APROVAÇÃO') - 1));
     return {
       numero: nextNumber,
       processo: '',
@@ -251,7 +251,7 @@ function buildInitialModalState(
   const parsedValidadeISO = rawValidade ? adicionarDiasAData(rawValidade, 0).dataISO : '';
   const validadeISO = /^\d{4}-\d{2}-\d{2}$/.test(parsedValidadeISO)
     ? parsedValidadeISO
-    : adicionarDiasAData(entradaISO, getDiasPrazoPorTipo(tipo)).dataISO;
+    : adicionarDiasAData(entradaISO, Math.max(0, getDiasPrazoPorTipo(tipo) - 1)).dataISO;
 
   const isSameAsRequerente =
     Boolean(reqNomeEdit.trim()) &&
@@ -405,10 +405,18 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     const matchedTipo = getTipoPorCodigo(codigoDigits, tipoProcesso);
     if (matchedTipo && matchedTipo !== tipoProcesso) {
       setTipoProcesso(matchedTipo);
-      const dias = getDiasPrazoPorTipo(matchedTipo);
-      const prazoCalc = adicionarDiasAData(baseDate, dias);
-      if (prazoCalc.dataISO) {
-        setDataValidade(prazoCalc.dataISO);
+      const calc = calcularPrazoProcesso({
+        dataEntrada: baseDate,
+        tipoProcesso: matchedTipo,
+        status,
+        detalhesSST: buildDetalhesSSTWithBilhetes(
+          { ...(editingRecord?.detalhesSST || {}), dataPronto: dataPronto.trim() },
+          listaBilhetes,
+          outrosBilhetes.trim()
+        ),
+      });
+      if (calc.dataLimiteISO) {
+        setDataValidade(calc.dataLimiteISO);
       }
     }
   };
@@ -418,10 +426,18 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     const nextDefaultCode = getCodigoPorTipo(novoTipo, dataExpedicao);
     setTipoProcesso(novoTipo);
 
-    const dias = getDiasPrazoPorTipo(novoTipo);
-    const prazoCalc = adicionarDiasAData(dataExpedicao, dias);
-    if (prazoCalc.dataISO) {
-      setDataValidade(prazoCalc.dataISO);
+    const calc = calcularPrazoProcesso({
+      dataEntrada: dataExpedicao,
+      tipoProcesso: novoTipo,
+      status,
+      detalhesSST: buildDetalhesSSTWithBilhetes(
+        { ...(editingRecord?.detalhesSST || {}), dataPronto: dataPronto.trim() },
+        listaBilhetes,
+        outrosBilhetes.trim()
+      ),
+    });
+    if (calc.dataLimiteISO) {
+      setDataValidade(calc.dataLimiteISO);
     }
 
     const curCod = blocoCodigo.trim();
@@ -461,10 +477,18 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         setBlocoCodigo(nextDefaultCode);
       }
     }
-    const dias = getDiasPrazoPorTipo(tipoProcesso);
-    const prazoCalc = adicionarDiasAData(novaData, dias);
-    if (prazoCalc.dataISO) {
-      setDataValidade(prazoCalc.dataISO);
+    const calc = calcularPrazoProcesso({
+      dataEntrada: novaData,
+      tipoProcesso,
+      status,
+      detalhesSST: buildDetalhesSSTWithBilhetes(
+        { ...(editingRecord?.detalhesSST || {}), dataPronto: dataPronto.trim() },
+        listaBilhetes,
+        outrosBilhetes.trim()
+      ),
+    });
+    if (calc.dataLimiteISO) {
+      setDataValidade(calc.dataLimiteISO);
     }
   };
 
@@ -658,7 +682,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       if (/^\d{4}-\d{2}-\d{2}$/.test(parsedValidadeISO)) {
         setDataValidade(parsedValidadeISO);
       } else {
-        const prazo = adicionarDiasAData(entradaISO, getDiasPrazoPorTipo(tipo));
+        const prazo = adicionarDiasAData(entradaISO, Math.max(0, getDiasPrazoPorTipo(tipo) - 1));
         setDataValidade(prazo.dataISO);
       }
       
@@ -729,7 +753,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setObm('10º GBM - ANGRA DOS REIS');
       setDataExpedicao(hojeISO);
       
-      const prazoInicial = adicionarDiasAData(hojeISO, getDiasPrazoPorTipo('CERTIFICADO DE APROVAÇÃO'));
+      const prazoInicial = adicionarDiasAData(hojeISO, Math.max(0, getDiasPrazoPorTipo('CERTIFICADO DE APROVAÇÃO') - 1));
       setDataValidade(prazoInicial.dataISO);
       
       setLogradouro('');
@@ -778,12 +802,39 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     setExigencias((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const recalcDeadlineForLista = (nextLista: BilheteItem[]) => {
+    const calc = calcularPrazoProcesso({
+      dataEntrada: dataExpedicao,
+      tipoProcesso,
+      status,
+      detalhesSST: buildDetalhesSSTWithBilhetes(
+        { ...(editingRecord?.detalhesSST || {}), dataPronto: dataPronto.trim() },
+        nextLista,
+        outrosBilhetes.trim()
+      ),
+    });
+    if (calc.dataLimiteISO) {
+      setDataValidade(calc.dataLimiteISO);
+    }
+  };
+
   const handleAddBilheteInModal = () => {
     if (!novoBilheteData.trim()) return;
+    const totalBilhetesAtuais = listaBilhetes.filter(
+      (b) =>
+        b.tipoDetalhe === 'BILHETE' ||
+        (b.tipoDetalhe !== 'RETORNO' &&
+          b.tipo !== 'ultimo' &&
+          !/retorno/i.test(b.rotulo || '') &&
+          !/retorno/i.test(b.statusOuParecer || ''))
+    ).length;
+    if (novoDetalheTipo === 'BILHETE' && totalBilhetesAtuais >= LIMITE_MAX_BILHETES_PROCESSO) {
+      return;
+    }
     const dataFormatada = formatDateBR(novoBilheteData.trim());
     const proximoNumero = listaBilhetes.length + 1;
     const detalheRotulo =
-      novoDetalheTipo === 'RETORNO' ? `Retorno ${proximoNumero}B` : `Bilhete ${proximoNumero}`;
+      novoDetalheTipo === 'RETORNO' ? `Retorno ${proximoNumero}` : `Bilhete ${proximoNumero}`;
     const autorRegistro = novoBilheteAutor.trim() || fiscalResponsavel.trim() || 'Fiscal SST 10º GBM';
     const novoItem: BilheteItem = {
       id: `b-manual-${Date.now()}`,
@@ -793,17 +844,22 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       rotulo: detalheRotulo,
       data: dataFormatada,
       dias: novoBilheteDias.trim() || '0',
-      statusOuParecer: novoBilheteStatus.trim() || 'Registrado',
-      despacho: novoBilheteDespacho.trim() || `Bilhete registrado por ${autorRegistro}.`,
+      autoContagemDias: true,
+      statusOuParecer: novoBilheteStatus.trim() || (novoDetalheTipo === 'RETORNO' ? `RETORNO ${proximoNumero}` : `BILHETE ${proximoNumero}`),
+      despacho: novoBilheteDespacho.trim() || `${detalheRotulo} registrado por ${autorRegistro}.`,
       autor: autorRegistro,
     };
-    setListaBilhetes((prev) => [...prev, novoItem]);
+    const nextLista = [...listaBilhetes, novoItem];
+    setListaBilhetes(nextLista);
+    recalcDeadlineForLista(nextLista);
     setIsAddingBilheteModal(false);
     setNovoBilheteDespacho('');
   };
 
   const handleRemoveBilheteInModal = (index: number) => {
-    setListaBilhetes((prev) => prev.filter((_, idx) => idx !== index));
+    const nextLista = listaBilhetes.filter((_, idx) => idx !== index);
+    setListaBilhetes(nextLista);
+    recalcDeadlineForLista(nextLista);
   };
 
   const validate = (): boolean => {
@@ -879,7 +935,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       detalhesSST: nextDetalhesSST,
     });
     const finalDataValidade =
-      (prazoRecalc.prazoBilheteAtivo || prazoRecalc.hasRetornoContinuo) && prazoRecalc.dataLimiteISO
+      (prazoRecalc.prazoBilheteAtivo || prazoRecalc.hasRetornoContinuo || prazoRecalc.indeferidoPorDecursoBilhete) && prazoRecalc.dataLimiteISO
         ? prazoRecalc.dataLimiteISO
         : dataValidade
         ? dataValidade
@@ -1368,7 +1424,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   required
                 />
                 <p className="text-[11px] text-blue-700 font-medium mt-1">
-                  {formatDateBR(dataExpedicao)} + {getDiasPrazoPorTipo(tipoProcesso)}d = {formatDateBR(dataValidade)}
+                  {formatDateBR(dataExpedicao)} ({getDiasPrazoPorTipo(tipoProcesso)}d inclusivo) → {formatDateBR(dataValidade)}
                 </p>
               </div>
 
@@ -1497,25 +1553,48 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
 
             {/* Informações da Regra Oficial de Prazo */}
-            <div className="mt-3 p-2.5 rounded-lg bg-blue-50/80 border border-blue-200 flex flex-wrap items-center justify-between gap-2 text-xs text-blue-950">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-blue-700 shrink-0" />
-                <span>
-                  <strong>Regra de Prazo:</strong> Tipo <strong>{tipoProcesso}</strong> ({getDiasPrazoPorTipo(tipoProcesso)} dias) · Entrada na SST: <strong>{formatDateBR(dataExpedicao)}</strong> → Prazo Limite: <strong>{formatDateBR(dataValidade)}</strong>
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const dias = getDiasPrazoPorTipo(tipoProcesso);
-                  const calc = adicionarDiasAData(dataExpedicao, dias);
-                  if (calc.dataISO) setDataValidade(calc.dataISO);
-                }}
-                className="text-[11px] font-semibold text-blue-800 hover:text-blue-950 underline cursor-pointer shrink-0"
-              >
-                Recalcular Automaticamente
-              </button>
-            </div>
+            {(() => {
+              const prazoModalPreview = calcularPrazoProcesso({
+                dataEntrada: dataExpedicao,
+                tipoProcesso,
+                status,
+                detalhesSST: buildDetalhesSSTWithBilhetes(
+                  { ...(editingRecord?.detalhesSST || {}), dataPronto: dataPronto.trim() },
+                  listaBilhetes,
+                  outrosBilhetes.trim()
+                ),
+              });
+              return (
+                <div className={`mt-3 p-2.5 rounded-lg border flex flex-wrap items-center justify-between gap-2 text-xs ${
+                  prazoModalPreview.indeferidoPorDecursoBilhete
+                    ? 'bg-amber-50/90 border-amber-300 text-amber-950'
+                    : 'bg-blue-50/80 border-blue-200 text-blue-950'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <Clock className={`w-4 h-4 shrink-0 ${prazoModalPreview.indeferidoPorDecursoBilhete ? 'text-amber-700' : 'text-blue-700'}`} />
+                    <span>
+                      <strong>Regra Inclusiva:</strong> Tipo <strong>{tipoProcesso}</strong> ({prazoModalPreview.diasPrazo}d) · Entrada: <strong>{formatDateBR(dataExpedicao)}</strong> · Consumido: <strong>{prazoModalPreview.diasConsumidosTotal}d</strong> · Saldo: <strong>{prazoModalPreview.saldoDiasRestantes}d</strong> →{' '}
+                      {prazoModalPreview.indeferidoPorDecursoBilhete ? (
+                        <strong className="text-amber-900">Alerta: bilhete excedeu 15d em {prazoModalPreview.dataIndeferimentoBR} (passível de indeferimento manual)</strong>
+                      ) : (
+                        <>Prazo Limite: <strong>{prazoModalPreview.dataLimiteBR !== '-' ? prazoModalPreview.dataLimiteBR : formatDateBR(dataValidade)}</strong></>
+                      )}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (prazoModalPreview.dataLimiteISO) {
+                        setDataValidade(prazoModalPreview.dataLimiteISO);
+                      }
+                    }}
+                    className="text-[11px] font-semibold text-blue-800 hover:text-blue-950 underline cursor-pointer shrink-0"
+                  >
+                    Recalcular Automaticamente
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Vínculos de Continuidade (Processo Anterior / Processo Seguinte) */}
             {!showVinculosFields ? (

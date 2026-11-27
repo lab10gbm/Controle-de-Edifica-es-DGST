@@ -269,28 +269,30 @@ export function getTipoPorCodigo(
 }
 
 /**
- * Adiciona uma quantidade de dias a uma data (suporta DD/MM/AAAA, YYYY-MM-DD e DD/MM).
- * Garante fidelidade ao exemplo: 01/10/2026 + 30 dias = 31/10/2026.
+ * Converte uma data em string (YYYY-MM-DD, YYYY-MM-DDTHH:mm, DD/MM/AAAA, DD/MM/AA, DD/MM)
+ * para ISO puro YYYY-MM-DD zerando qualquer componente de hora/minuto/fuso horário.
  */
-export function adicionarDiasAData(
+export function normalizeToISODate(
   dataStr?: string | null,
-  dias: number = 0
-): { dataBR: string; dataISO: string } {
+  fallbackYear?: number
+): string {
   if (!dataStr || dataStr === '-' || dataStr === '- - - -' || dataStr.trim() === '') {
-    return { dataBR: '-', dataISO: '' };
+    return '';
   }
 
   const str = dataStr.trim();
-  const currentYear = new Date().getFullYear();
-  let ano = currentYear;
-  let mes = 1;
-  let dia = 1;
+  const refYear = fallbackYear && Number.isFinite(fallbackYear) ? fallbackYear : new Date().getFullYear();
 
-  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
-    const parts = str.slice(0, 10).split('-');
-    ano = parseInt(parts[0], 10);
-    mes = parseInt(parts[1], 10);
-    dia = parseInt(parts[2], 10);
+  let ano = 0;
+  let mes = 0;
+  let dia = 0;
+
+  // ISO com ou sem horário (ex: 2026-11-18T16:45:00Z -> pega apenas 2026-11-18)
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    ano = parseInt(isoMatch[1], 10);
+    mes = parseInt(isoMatch[2], 10);
+    dia = parseInt(isoMatch[3], 10);
   } else if (/^\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4}$/.test(str)) {
     const parts = str.split(/[\/\.-]/);
     dia = parseInt(parts[0], 10);
@@ -305,43 +307,546 @@ export function adicionarDiasAData(
     const parts = str.split(/[\/\.-]/);
     dia = parseInt(parts[0], 10);
     mes = parseInt(parts[1], 10);
-    ano = currentYear;
+    ano = refYear;
   } else {
-    return { dataBR: str, dataISO: str };
+    return '';
   }
 
-  // Cria objeto Date no fuso horário local evitando desvios UTC
-  const dataObj = new Date(ano, mes - 1, dia);
-  dataObj.setDate(dataObj.getDate() + dias);
+  if (ano < 1900 || mes < 1 || mes > 12 || dia < 1 || dia > 31) {
+    return '';
+  }
 
-  const resDia = String(dataObj.getDate()).padStart(2, '0');
-  const resMes = String(dataObj.getMonth() + 1).padStart(2, '0');
-  const resAno = dataObj.getFullYear();
+  const utcDate = new Date(Date.UTC(ano, mes - 1, dia));
+  if (
+    utcDate.getUTCFullYear() !== ano ||
+    utcDate.getUTCMonth() !== mes - 1 ||
+    utcDate.getUTCDate() !== dia
+  ) {
+    return '';
+  }
+
+  return `${String(ano).padStart(4, '0')}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+}
+
+export function isoToDateBR(iso?: string | null): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '-';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/**
+ * Adiciona uma quantidade de dias corridos a uma data usando aritmética UTC pura (00:00:00Z),
+ * evitando qualquer distorção de fuso horário ou horário de verão.
+ */
+export function adicionarDiasAData(
+  dataStr?: string | null,
+  dias: number = 0,
+  fallbackYear?: number
+): { dataBR: string; dataISO: string } {
+  if (!dataStr || dataStr === '-' || dataStr === '- - - -' || dataStr.trim() === '') {
+    return { dataBR: '-', dataISO: '' };
+  }
+
+  const baseISO = normalizeToISODate(dataStr, fallbackYear);
+  if (!baseISO) {
+    const trimmed = dataStr.trim();
+    return { dataBR: trimmed, dataISO: trimmed };
+  }
+
+  const [ano, mes, dia] = baseISO.split('-').map(Number);
+  const utcObj = new Date(Date.UTC(ano, mes - 1, dia + dias));
+
+  const resDia = String(utcObj.getUTCDate()).padStart(2, '0');
+  const resMes = String(utcObj.getUTCMonth() + 1).padStart(2, '0');
+  const resAno = utcObj.getUTCFullYear();
+  const dataISO = `${resAno}-${resMes}-${resDia}`;
 
   return {
     dataBR: `${resDia}/${resMes}/${resAno}`,
-    dataISO: `${resAno}-${resMes}-${resDia}`,
+    dataISO,
   };
 }
 
-function diffDaysISO(startISO?: string | null, endISO?: string | null): number {
+/**
+ * Diferença calendário pura entre duas datas ISO (YYYY-MM-DD), sempre em dias inteiros UTC (00:00:00).
+ */
+export function diffDaysISO(startISO?: string | null, endISO?: string | null): number {
   if (!startISO || !endISO) return 0;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startISO) || !/^\d{4}-\d{2}-\d{2}$/.test(endISO)) return 0;
   const [sy, sm, sd] = startISO.split('-').map(Number);
   const [ey, em, ed] = endISO.split('-').map(Number);
   const startUTC = Date.UTC(sy, sm - 1, sd);
   const endUTC = Date.UTC(ey, em - 1, ed);
-  return Math.round((endUTC - startUTC) / (1000 * 60 * 60 * 24));
+  return Math.round((endUTC - startUTC) / 86_400_000);
+}
+
+/**
+ * Contagem INCLUSIVA de dias corridos entre duas datas ISO:
+ * Fórmula: (Data Fim - Data Início) + 1
+ */
+export function calcularDiasInclusivosISO(startISO?: string | null, endISO?: string | null): number {
+  if (!startISO || !endISO) return 0;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startISO) || !/^\d{4}-\d{2}-\d{2}$/.test(endISO)) return 0;
+  return diffDaysISO(startISO, endISO) + 1;
+}
+
+export const LIMITE_MAX_BILHETES_PROCESSO = 5;
+export const PRAZO_MAX_BILHETE_DIAS = 15;
+export const STATUS_INDEFERIDO_DECURSO_BILHETE = 'Alerta: Prazo do bilhete excedido (> 15d) — passível de indeferimento';
+
+export interface BlocoHistoricoPrazo {
+  ordem: number;
+  tipo: 'TRAMITE' | 'BILHETE_PAUSA' | 'BILHETE_ABERTO' | 'BILHETE_EXPIRADO' | 'TRAMITE_FINAL';
+  titulo: string;
+  descricao: string;
+  dataInicioBR: string;
+  dataInicioISO: string;
+  dataFimBR: string;
+  dataFimISO: string;
+  dias: number;
+  limiteBilheteBR?: string;
+  limiteBilheteISO?: string;
+  dataIndeferimentoBR?: string;
+  dataIndeferimentoISO?: string;
+  saldoAntes?: number;
+  saldoApos?: number;
+  excedeuLimite?: boolean;
+}
+
+export interface EventoBilheteEntrada {
+  dataBilhete: string;
+  dataRetorno?: string | null;
+  rotuloBilhete?: string;
+  rotuloRetorno?: string;
+  isFinal?: boolean;
+  finalRotulo?: string;
+}
+
+export interface CalculoPrazoDetalhadoInput {
+  dataEntrada: string;
+  prazoTotalDias?: number;
+  bilhetes?: EventoBilheteEntrada[];
+  dataReferencia?: string | null;
+  dataPronto?: string | null;
+  isConcluidoExterno?: boolean;
+}
+
+export interface CalculoPrazoDetalhadoResult {
+  statusProcesso: string;
+  diasPrazoTotal: number;
+  diasConsumidosTotal: number;
+  saldoDiasRestantes: number;
+  dataLimiteFinal: string;
+  dataLimiteFinalBR: string;
+  dataLimiteFinalISO: string;
+  dataIndeferimento: string | null;
+  dataIndeferimentoBR?: string;
+  dataIndeferimentoISO?: string;
+  indeferidoPorDecursoBilhete: boolean;
+  prazoBilheteAtivo: boolean;
+  bilheteAtivoRotulo?: string;
+  bilheteAtivoDataBR?: string;
+  bilheteAtivoDataISO?: string;
+  bilheteAtivoLimiteBR?: string;
+  bilheteAtivoLimiteISO?: string;
+  bilheteAtivoDiasDecorridos?: number;
+  ultimoRetornoDataBR?: string;
+  hasRetornoContinuo: boolean;
+  diasBonusBilhetes: number;
+  bilhetesCount: number;
+  historicoBlocos: BlocoHistoricoPrazo[];
+}
+
+/**
+ * Engine pura de cálculo de prazos por contagem inclusiva, pausas por bilhete (máx 5, até 15 dias cada)
+ * e retomada no retorno.
+ *
+ * Regras:
+ * 1. Contagem inclusiva: Dias = (Data Fim - Data Início) + 1 (sempre com horas zeradas em UTC).
+ * 2. Entrada inicia o relógio principal (ex: 10 dias ou prazo legal do tipo).
+ * 3. Bilhete pausa o relógio principal na data da emissão (o dia do bilhete é consumido no bloco atual)
+ *    e abre sub-relógio paralelo de até 15 dias corridos inclusivos (limite no 15º dia = bilhete + 14d).
+ * 4. Se o retorno (ou a data atual se aberto) ultrapassar 15 dias (> 15), gera alerta de decurso no 16º dia
+ *    (passível de indeferimento manual, sem alterar o status automaticamente) e trava o relógio principal.
+ * 5. No retorno dentro dos 15 dias, o bilhete encerra e o relógio principal retoma na própria data do retorno
+ *    consumindo o saldo restante até zerar (Data Limite Final = Data Início Bloco + (Saldo - 1)).
+ */
+export function calcularPrazoDetalhado(input: CalculoPrazoDetalhadoInput): CalculoPrazoDetalhadoResult {
+  const prazoTotalDias = Math.max(1, Math.floor(input.prazoTotalDias ?? 10));
+  const entradaISO = normalizeToISODate(input.dataEntrada);
+
+  if (!entradaISO) {
+    return {
+      statusProcesso: 'Sem data de entrada',
+      diasPrazoTotal: prazoTotalDias,
+      diasConsumidosTotal: 0,
+      saldoDiasRestantes: prazoTotalDias,
+      dataLimiteFinal: '-',
+      dataLimiteFinalBR: '-',
+      dataLimiteFinalISO: '',
+      dataIndeferimento: null,
+      indeferidoPorDecursoBilhete: false,
+      prazoBilheteAtivo: false,
+      hasRetornoContinuo: false,
+      diasBonusBilhetes: 0,
+      bilhetesCount: 0,
+      historicoBlocos: [],
+    };
+  }
+
+  const entradaYear = parseInt(entradaISO.slice(0, 4), 10);
+  const todayISO = getTodayISO();
+  const dataProntoISO = normalizeToISODate(input.dataPronto, entradaYear);
+  const dataRefISO =
+    normalizeToISODate(input.dataReferencia, entradaYear) ||
+    dataProntoISO ||
+    todayISO;
+  const isConcluidoExterno = Boolean(input.isConcluidoExterno || dataProntoISO);
+
+  const rawEventos = (input.bilhetes || []).slice(0, LIMITE_MAX_BILHETES_PROCESSO);
+  const historicoBlocos: BlocoHistoricoPrazo[] = [];
+
+  let cursorInicioISO = entradaISO;
+  let saldoClock = prazoTotalDias;
+  let diasConsumidosClock = 0;
+  let totalDiasEmPausa = 0;
+  let hasRetornoContinuo = false;
+  let ultimoRetornoDataBR: string | undefined;
+
+  let indeferidoPorDecursoBilhete = false;
+  let dataIndeferimentoISO = '';
+  let dataLimiteFinalISO = '';
+  let prazoBilheteAtivo = false;
+  let bilheteAtivoRotulo: string | undefined;
+  let bilheteAtivoDataISO: string | undefined;
+  let bilheteAtivoLimiteISO: string | undefined;
+  let bilheteAtivoDiasDecorridos: number | undefined;
+  let blocoSeq = 1;
+  let tramBlocoNum = 1;
+  let bilheteNum = 1;
+  let clockExhaustedBeforeEnd = false;
+
+  for (let evIdx = 0; evIdx < rawEventos.length; evIdx++) {
+    const ev = rawEventos[evIdx];
+    const bISO = normalizeToISODate(ev.dataBilhete, entradaYear);
+    if (!bISO) continue;
+
+    // 1) Consumo do relógio principal até a data do bilhete (inclusivo)
+    const saldoAntes = saldoClock;
+    let diasBloco = 0;
+
+    if (bISO >= cursorInicioISO) {
+      diasBloco = calcularDiasInclusivosISO(cursorInicioISO, bISO);
+    }
+
+    if (saldoAntes > 0 && diasBloco > saldoAntes && !clockExhaustedBeforeEnd) {
+      // Relógio principal zerou antes da emissão deste bilhete
+      const dataZerouISO = adicionarDiasAData(cursorInicioISO, saldoAntes - 1).dataISO;
+      dataLimiteFinalISO = dataZerouISO;
+      clockExhaustedBeforeEnd = true;
+    }
+
+    const diasConsumidosEfetivos = Math.min(saldoAntes, diasBloco);
+    diasConsumidosClock += diasConsumidosEfetivos;
+    saldoClock = Math.max(0, saldoAntes - diasBloco);
+
+    if (saldoClock === 0 && !dataLimiteFinalISO && diasBloco > 0) {
+      dataLimiteFinalISO = bISO;
+      clockExhaustedBeforeEnd = true;
+    }
+
+    historicoBlocos.push({
+      ordem: blocoSeq++,
+      tipo: 'TRAMITE',
+      titulo: `Bloco ${tramBlocoNum} (${tramBlocoNum === 1 ? 'Entrada' : `Retorno ${tramBlocoNum - 1}`} até ${ev.rotuloBilhete || `Bilhete ${bilheteNum}`})`,
+      descricao: `${isoToDateBR(cursorInicioISO)} a ${isoToDateBR(bISO)} = ${diasBloco} dia(s) consumido(s). Saldo restante: ${saldoClock} dia(s).`,
+      dataInicioBR: isoToDateBR(cursorInicioISO),
+      dataInicioISO: cursorInicioISO,
+      dataFimBR: isoToDateBR(bISO),
+      dataFimISO: bISO,
+      dias: diasBloco,
+      saldoAntes,
+      saldoApos: saldoClock,
+    });
+    tramBlocoNum++;
+
+    // 2) Sub-relógio paralelo do bilhete (máximo 15 dias inclusivos)
+    const limiteBilheteISO = adicionarDiasAData(bISO, PRAZO_MAX_BILHETE_DIAS - 1).dataISO; // 15º dia
+    const dataIndefPrevistaISO = adicionarDiasAData(bISO, PRAZO_MAX_BILHETE_DIAS).dataISO; // 16º dia
+    const rISO = normalizeToISODate(ev.dataRetorno, entradaYear);
+    const nextEv = rawEventos
+      .slice(evIdx + 1)
+      .find((n) => Boolean(normalizeToISODate(n.dataBilhete, entradaYear)));
+    const nextBISO = nextEv ? normalizeToISODate(nextEv.dataBilhete, entradaYear) : '';
+
+    if (rISO) {
+      const diasBilhete = rISO >= bISO ? calcularDiasInclusivosISO(bISO, rISO) : 1;
+
+      if (diasBilhete > PRAZO_MAX_BILHETE_DIAS && !isConcluidoExterno && !nextEv) {
+        indeferidoPorDecursoBilhete = true;
+        dataIndeferimentoISO = dataIndefPrevistaISO;
+        dataLimiteFinalISO = dataIndefPrevistaISO;
+
+        historicoBlocos.push({
+          ordem: blocoSeq++,
+          tipo: 'BILHETE_EXPIRADO',
+          titulo: `${ev.rotuloBilhete || `Bilhete ${bilheteNum}`} (Prazo de 15d excedido)`,
+          descricao: `${isoToDateBR(bISO)} a ${isoToDateBR(rISO)} = ${diasBilhete} dia(s) (limite: ${isoToDateBR(limiteBilheteISO)}). Prazo de 15d excedido em ${isoToDateBR(dataIndefPrevistaISO)} — passível de indeferimento manual.`,
+          dataInicioBR: isoToDateBR(bISO),
+          dataInicioISO: bISO,
+          dataFimBR: isoToDateBR(rISO),
+          dataFimISO: rISO,
+          dias: diasBilhete,
+          limiteBilheteBR: isoToDateBR(limiteBilheteISO),
+          limiteBilheteISO,
+          dataIndeferimentoBR: isoToDateBR(dataIndefPrevistaISO),
+          dataIndeferimentoISO: dataIndefPrevistaISO,
+          saldoAntes: saldoClock,
+          saldoApos: saldoClock,
+          excedeuLimite: true,
+        });
+        break;
+      }
+
+      // Retorno válido (ou seguido de novo bilhete / já concluído): encerra pausa e retoma relógio na data do retorno
+      const diasPausaEfetiva = Math.max(0, diffDaysISO(bISO, rISO));
+      totalDiasEmPausa += diasPausaEfetiva;
+      hasRetornoContinuo = true;
+      ultimoRetornoDataBR = isoToDateBR(rISO);
+
+      historicoBlocos.push({
+        ordem: blocoSeq++,
+        tipo: 'BILHETE_PAUSA',
+        titulo: `${ev.rotuloBilhete || `Bilhete ${bilheteNum}`} → ${ev.rotuloRetorno || `Retorno ${bilheteNum}`}`,
+        descricao: `Pausa de ${isoToDateBR(bISO)} a ${isoToDateBR(rISO)} = ${diasBilhete} dia(s) no sub-relógio (máx. 15d -> ${diasBilhete > PRAZO_MAX_BILHETE_DIAS ? 'excedido, seguido por novo bilhete' : diasBilhete === 15 ? 'no limite exato' : 'OK'}). Retoma com saldo de ${saldoClock} dia(s).`,
+        dataInicioBR: isoToDateBR(bISO),
+        dataInicioISO: bISO,
+        dataFimBR: isoToDateBR(rISO),
+        dataFimISO: rISO,
+        dias: diasBilhete,
+        limiteBilheteBR: isoToDateBR(limiteBilheteISO),
+        limiteBilheteISO,
+        saldoAntes: saldoClock,
+        saldoApos: saldoClock,
+        excedeuLimite: diasBilhete > PRAZO_MAX_BILHETE_DIAS,
+      });
+
+      cursorInicioISO = rISO;
+      bilheteNum++;
+    } else if (ev.isFinal) {
+      // Despacho final direto (ex: GERADO DI / FINALIZADO sem retorno intermediário)
+      historicoBlocos.push({
+        ordem: blocoSeq++,
+        tipo: 'BILHETE_PAUSA',
+        titulo: `${ev.rotuloBilhete || `Bilhete ${bilheteNum}`} (${ev.finalRotulo || 'Despacho Final'})`,
+        descricao: `Encerramento registrado em ${isoToDateBR(bISO)}.`,
+        dataInicioBR: isoToDateBR(bISO),
+        dataInicioISO: bISO,
+        dataFimBR: isoToDateBR(bISO),
+        dataFimISO: bISO,
+        dias: 1,
+        limiteBilheteBR: isoToDateBR(limiteBilheteISO),
+        limiteBilheteISO,
+        saldoAntes: saldoClock,
+        saldoApos: saldoClock,
+        excedeuLimite: false,
+      });
+      cursorInicioISO = bISO;
+      bilheteNum++;
+    } else if (nextEv && nextBISO) {
+      // Bilhete anterior sem retorno registrado, porém sucedido diretamente por um novo bilhete (ex: Bilhete 1 -> Bilhete 2)
+      const diasEntreBilhetes = nextBISO >= bISO ? calcularDiasInclusivosISO(bISO, nextBISO) : 1;
+      totalDiasEmPausa += Math.max(0, diffDaysISO(bISO, nextBISO));
+
+      historicoBlocos.push({
+        ordem: blocoSeq++,
+        tipo: 'BILHETE_PAUSA',
+        titulo: `${ev.rotuloBilhete || `Bilhete ${bilheteNum}`} → ${nextEv.rotuloBilhete || `Bilhete ${bilheteNum + 1}`}`,
+        descricao: `Emitido em ${isoToDateBR(bISO)} e sucedido por ${nextEv.rotuloBilhete || `Bilhete ${bilheteNum + 1}`} em ${isoToDateBR(nextBISO)} (sem retorno intermediário registrado).`,
+        dataInicioBR: isoToDateBR(bISO),
+        dataInicioISO: bISO,
+        dataFimBR: isoToDateBR(nextBISO),
+        dataFimISO: nextBISO,
+        dias: diasEntreBilhetes,
+        limiteBilheteBR: isoToDateBR(limiteBilheteISO),
+        limiteBilheteISO,
+        saldoAntes: saldoClock,
+        saldoApos: saldoClock,
+        excedeuLimite: false,
+      });
+
+      cursorInicioISO = nextBISO >= bISO ? nextBISO : bISO;
+      bilheteNum++;
+    } else {
+      // Bilhete ainda em aberto (sem retorno)
+      const diasBilheteAtual = dataRefISO >= bISO ? calcularDiasInclusivosISO(bISO, dataRefISO) : 1;
+
+      if (!isConcluidoExterno && diasBilheteAtual > PRAZO_MAX_BILHETE_DIAS) {
+        indeferidoPorDecursoBilhete = true;
+        dataIndeferimentoISO = dataIndefPrevistaISO;
+        dataLimiteFinalISO = dataIndefPrevistaISO;
+
+        historicoBlocos.push({
+          ordem: blocoSeq++,
+          tipo: 'BILHETE_EXPIRADO',
+          titulo: `${ev.rotuloBilhete || `Bilhete ${bilheteNum}`} (Sem retorno após 15d)`,
+          descricao: `Iniciado em ${isoToDateBR(bISO)} (${diasBilheteAtual} dias até ${isoToDateBR(dataRefISO)}). Limite era ${isoToDateBR(limiteBilheteISO)}. Prazo de 15d excedido em ${isoToDateBR(dataIndefPrevistaISO)} — passível de indeferimento manual.`,
+          dataInicioBR: isoToDateBR(bISO),
+          dataInicioISO: bISO,
+          dataFimBR: isoToDateBR(dataRefISO),
+          dataFimISO: dataRefISO,
+          dias: diasBilheteAtual,
+          limiteBilheteBR: isoToDateBR(limiteBilheteISO),
+          limiteBilheteISO,
+          dataIndeferimentoBR: isoToDateBR(dataIndefPrevistaISO),
+          dataIndeferimentoISO: dataIndefPrevistaISO,
+          saldoAntes: saldoClock,
+          saldoApos: saldoClock,
+          excedeuLimite: true,
+        });
+      } else {
+        prazoBilheteAtivo = !isConcluidoExterno;
+        bilheteAtivoRotulo = ev.rotuloBilhete || `Bilhete ${bilheteNum}`;
+        bilheteAtivoDataISO = bISO;
+        bilheteAtivoLimiteISO = limiteBilheteISO;
+        bilheteAtivoDiasDecorridos = diasBilheteAtual;
+        if (!isConcluidoExterno) {
+          dataLimiteFinalISO = limiteBilheteISO;
+        }
+
+        historicoBlocos.push({
+          ordem: blocoSeq++,
+          tipo: 'BILHETE_ABERTO',
+          titulo: `${bilheteAtivoRotulo} (Pausa em andamento)`,
+          descricao: `Iniciado em ${isoToDateBR(bISO)}: ${diasBilheteAtual}/15 dia(s) decorrido(s) até ${isoToDateBR(dataRefISO)}. Limite para retorno: ${isoToDateBR(limiteBilheteISO)} (alerta de excesso no 16º dia: ${isoToDateBR(dataIndefPrevistaISO)}).`,
+          dataInicioBR: isoToDateBR(bISO),
+          dataInicioISO: bISO,
+          dataFimBR: isoToDateBR(dataRefISO),
+          dataFimISO: dataRefISO,
+          dias: diasBilheteAtual,
+          limiteBilheteBR: isoToDateBR(limiteBilheteISO),
+          limiteBilheteISO,
+          dataIndeferimentoBR: isoToDateBR(dataIndefPrevistaISO),
+          dataIndeferimentoISO: dataIndefPrevistaISO,
+          saldoAntes: saldoClock,
+          saldoApos: saldoClock,
+          excedeuLimite: false,
+        });
+      }
+      // Bilhete aberto interrompe a projeção do relógio principal até haver retorno
+      break;
+    }
+  }
+
+  // 3) Se não foi indeferido por bilhete e não está pausado em bilhete aberto, calcula o bloco final do relógio principal
+  let diasConsumidosAteReferencia = diasConsumidosClock;
+  let saldoDiasRestantesAtual = saldoClock;
+
+  if (!indeferidoPorDecursoBilhete && !prazoBilheteAtivo) {
+    if (!clockExhaustedBeforeEnd && saldoClock > 0) {
+      dataLimiteFinalISO = adicionarDiasAData(cursorInicioISO, saldoClock - 1).dataISO;
+
+      historicoBlocos.push({
+        ordem: blocoSeq++,
+        tipo: 'TRAMITE_FINAL',
+        titulo: `Bloco ${tramBlocoNum} (${tramBlocoNum === 1 ? 'Entrada' : `Retorno ${tramBlocoNum - 1}`} até Vencimento)`,
+        descricao: `Retoma em ${isoToDateBR(cursorInicioISO)} consumindo os ${saldoClock} dia(s) restante(s) → Data Limite Final: ${isoToDateBR(dataLimiteFinalISO)}.`,
+        dataInicioBR: isoToDateBR(cursorInicioISO),
+        dataInicioISO: cursorInicioISO,
+        dataFimBR: isoToDateBR(dataLimiteFinalISO),
+        dataFimISO: dataLimiteFinalISO,
+        dias: saldoClock,
+        saldoAntes: saldoClock,
+        saldoApos: 0,
+      });
+    } else if (!dataLimiteFinalISO) {
+      dataLimiteFinalISO = cursorInicioISO;
+    }
+
+    // Calcula dias consumidos e saldo restante exatamente na data de referência (dataPronto ou hoje)
+    if (dataRefISO < cursorInicioISO) {
+      diasConsumidosAteReferencia = diasConsumidosClock;
+      saldoDiasRestantesAtual = saldoClock;
+    } else if (dataRefISO >= dataLimiteFinalISO) {
+      diasConsumidosAteReferencia = prazoTotalDias;
+      saldoDiasRestantesAtual = 0;
+    } else {
+      const consumidoNoBloco = calcularDiasInclusivosISO(cursorInicioISO, dataRefISO);
+      diasConsumidosAteReferencia = Math.min(prazoTotalDias, diasConsumidosClock + consumidoNoBloco);
+      saldoDiasRestantesAtual = Math.max(0, prazoTotalDias - diasConsumidosAteReferencia);
+    }
+  }
+
+  // Determina statusProcesso textual detalhado
+  let statusProcesso = 'Em andamento';
+  if (indeferidoPorDecursoBilhete) {
+    statusProcesso = STATUS_INDEFERIDO_DECURSO_BILHETE;
+  } else if (isConcluidoExterno) {
+    if (dataProntoISO && dataLimiteFinalISO) {
+      statusProcesso = dataProntoISO <= dataLimiteFinalISO ? 'Concluído no prazo' : 'Concluído com atraso';
+    } else {
+      statusProcesso = 'Concluído';
+    }
+  } else if (prazoBilheteAtivo) {
+    statusProcesso = `Aguardando retorno (${bilheteAtivoDiasDecorridos ?? 1}/15 dias)`;
+  } else if (dataLimiteFinalISO && dataRefISO > dataLimiteFinalISO) {
+    statusProcesso = 'Prazo vencido';
+  } else {
+    statusProcesso = 'No prazo';
+  }
+
+  const dataLimiteBaseISO = adicionarDiasAData(entradaISO, prazoTotalDias - 1).dataISO;
+  const diasBonusBilhetes = prazoBilheteAtivo
+    ? PRAZO_MAX_BILHETE_DIAS
+    : dataLimiteFinalISO && dataLimiteBaseISO
+    ? Math.max(0, totalDiasEmPausa || diffDaysISO(dataLimiteBaseISO, dataLimiteFinalISO))
+    : 0;
+
+  return {
+    statusProcesso,
+    diasPrazoTotal: prazoTotalDias,
+    diasConsumidosTotal: diasConsumidosAteReferencia,
+    saldoDiasRestantes: saldoDiasRestantesAtual,
+    dataLimiteFinal: indeferidoPorDecursoBilhete
+      ? isoToDateBR(dataIndeferimentoISO)
+      : isoToDateBR(dataLimiteFinalISO),
+    dataLimiteFinalBR: isoToDateBR(dataLimiteFinalISO),
+    dataLimiteFinalISO,
+    dataIndeferimento: dataIndeferimentoISO ? isoToDateBR(dataIndeferimentoISO) : null,
+    dataIndeferimentoBR: dataIndeferimentoISO ? isoToDateBR(dataIndeferimentoISO) : undefined,
+    dataIndeferimentoISO: dataIndeferimentoISO || undefined,
+    indeferidoPorDecursoBilhete,
+    prazoBilheteAtivo,
+    bilheteAtivoRotulo,
+    bilheteAtivoDataBR: bilheteAtivoDataISO ? isoToDateBR(bilheteAtivoDataISO) : undefined,
+    bilheteAtivoDataISO,
+    bilheteAtivoLimiteBR: bilheteAtivoLimiteISO ? isoToDateBR(bilheteAtivoLimiteISO) : undefined,
+    bilheteAtivoLimiteISO,
+    bilheteAtivoDiasDecorridos,
+    ultimoRetornoDataBR,
+    hasRetornoContinuo,
+    diasBonusBilhetes,
+    bilhetesCount: rawEventos.length,
+    historicoBlocos,
+  };
 }
 
 export interface InfoPrazoProcesso {
   tipoNormalizado: string;
+  statusProcesso: string;
   diasPrazo: number;
   diasPrazoEfetivo: number;
   diasBonusBilhetes: number;
+  diasConsumidosTotal: number;
+  saldoDiasRestantes: number;
   prazoBilheteAtivo: boolean;
   bilheteAtivoRotulo?: string;
   bilheteAtivoDataBR?: string;
+  bilheteAtivoLimiteBR?: string;
+  bilheteAtivoDiasDecorridos?: number;
+  indeferidoPorDecursoBilhete: boolean;
+  dataIndeferimentoBR?: string;
+  dataIndeferimentoISO?: string;
   hasRetornoContinuo: boolean;
   ultimoRetornoDataBR?: string;
   dataEntradaBR: string;
@@ -359,21 +864,135 @@ export interface InfoPrazoProcesso {
   isConcluido: boolean;
   concluidoNoPrazo: boolean;
   diasNaSST: number;
+  historicoBlocos: BlocoHistoricoPrazo[];
+}
+
+function extrairCiclosBilhetesParaCalculo(
+  sst: SSTProcessDetails | undefined,
+  entradaYear: number
+): EventoBilheteEntrada[] {
+  if (!sst) return [];
+  const hasAny = Boolean(
+    (sst.listaBilhetes && sst.listaBilhetes.length > 0) ||
+      (sst.dataBilhete && sst.dataBilhete !== '-' && sst.dataBilhete !== '- - - -') ||
+      (sst.bilhetes && sst.bilhetes !== '-' && sst.bilhetes !== '- - - -') ||
+      (sst.ultimoBilhete && sst.ultimoBilhete !== '-' && sst.ultimoBilhete !== '- - - -')
+  );
+  if (!hasAny) return [];
+
+  const bilhetesLista = deriveListaBilhetes('calc', sst);
+  const outrosUpper = String(sst.outrosBilhetes || '').toUpperCase().trim();
+
+  const classifyItem = (b: BilheteItem, total: number): 'BILHETE' | 'RETORNO' | 'FINAL' => {
+    const stUpper = String(b.statusOuParecer || '').toUpperCase().trim();
+    const rotUpper = String(b.rotulo || '').toUpperCase().trim();
+
+    const effectiveSt =
+      total === 1 && !b.tipoDetalhe && (outrosUpper === 'FINALIZADO' || outrosUpper === 'GERADO DI')
+        ? outrosUpper
+        : stUpper;
+
+    if (
+      effectiveSt === 'FINALIZADO' ||
+      effectiveSt === 'GERADO DI' ||
+      effectiveSt.includes('DEFERID') ||
+      effectiveSt.includes('INDEFERID') ||
+      effectiveSt.includes('ENTREGU')
+    ) {
+      return 'FINAL';
+    }
+    if (b.tipoDetalhe === 'RETORNO') {
+      return 'RETORNO';
+    }
+    if (b.tipoDetalhe === 'BILHETE') {
+      return 'BILHETE';
+    }
+    if (b.tipo === 'primeiro' && rotUpper.includes('BILHETE')) {
+      return 'BILHETE';
+    }
+    if (effectiveSt.includes('RETORNO') || rotUpper.startsWith('RETORNO')) {
+      return 'RETORNO';
+    }
+    if (effectiveSt.includes('BILHETE') || rotUpper.includes('BILHETE')) {
+      return 'BILHETE';
+    }
+    if (b.tipo === 'ultimo') {
+      return 'RETORNO';
+    }
+    return 'BILHETE';
+  };
+
+  const eventos: EventoBilheteEntrada[] = [];
+  let openEvent: EventoBilheteEntrada | null = null;
+
+  for (const b of bilhetesLista) {
+    const itemISO = normalizeToISODate(b.data, entradaYear);
+    if (!itemISO) continue;
+
+    const origemISO = b.dataBilheteOrigem ? normalizeToISODate(b.dataBilheteOrigem, entradaYear) : '';
+    const kind = classifyItem(b, bilhetesLista.length);
+
+    if (kind === 'BILHETE') {
+      if (openEvent) {
+        eventos.push(openEvent);
+      }
+      openEvent = {
+        dataBilhete: itemISO,
+        rotuloBilhete: (b.rotulo || b.statusOuParecer || `Bilhete ${eventos.length + 1}`).trim(),
+      };
+    } else if (kind === 'RETORNO') {
+      if (openEvent) {
+        openEvent.dataRetorno = itemISO;
+        openEvent.rotuloRetorno = (b.rotulo || b.statusOuParecer || `Retorno ${eventos.length + 1}`).trim();
+        eventos.push(openEvent);
+        openEvent = null;
+      } else if (origemISO) {
+        eventos.push({
+          dataBilhete: origemISO,
+          dataRetorno: itemISO,
+          rotuloBilhete: `Bilhete ${eventos.length + 1}`,
+          rotuloRetorno: (b.rotulo || b.statusOuParecer || `Retorno ${eventos.length + 1}`).trim(),
+        });
+      }
+    } else {
+      // FINAL (GERADO DI / FINALIZADO)
+      const finalRotulo = (b.statusOuParecer || b.rotulo || 'FINALIZADO').trim();
+      if (openEvent) {
+        openEvent.dataRetorno = itemISO;
+        openEvent.rotuloRetorno = finalRotulo;
+        openEvent.isFinal = true;
+        openEvent.finalRotulo = finalRotulo;
+        eventos.push(openEvent);
+        openEvent = null;
+      } else {
+        eventos.push({
+          dataBilhete: itemISO,
+          rotuloBilhete: (b.rotulo || finalRotulo).trim(),
+          isFinal: true,
+          finalRotulo,
+        });
+      }
+    }
+  }
+
+  if (openEvent) {
+    eventos.push(openEvent);
+  }
+
+  return eventos.slice(0, LIMITE_MAX_BILHETES_PROCESSO);
 }
 
 /**
  * Calcula todas as informações consolidadas de prazo de um processo.
- * REGRA OFICIAL DE PRAZO:
- * - Data de Entrada na SST + Prazo do Tipo = Prazo Limite Base.
- * - BILHETES & RETORNO:
- *   - Cada bilhete cadastrado permite aumento de prazo de até 15 dias a partir da data do bilhete.
- *   - Quando há um BILHETE em aberto (sem retorno posterior), o prazo limite ativo exibido
- *     passa a ser Data do Bilhete + 15 dias (evidenciando a proximidade do limite antes de indeferimento).
- *   - Quando o bilhete é alterado para RETORNO (ou recebe um RETORNO), mantém-se a continuidade
- *     do prazo (computando os dias suspensos até o retorno, limitados a 15 dias por bilhete,
- *     sem regressão abaixo do prazo estendido pelo bilhete).
- * - MARCO INTERRUPTOR DA CONTAGEM: A contagem de dias do processo é interrompida
- *   na "DATA DO PRONTO" (coluna DATA DO PRONTO da planilha).
+ * REGRA OFICIAL DE PRAZO (Contagem Inclusiva + Pausa por Bilhete + Retomada no Retorno):
+ * - Contagem inclusiva: Dias = (Data Fim - Data Início) + 1 (em UTC puro 00:00:00).
+ * - Cada Bilhete pausa imediatamente o relógio principal na data de sua emissão e abre
+ *   um sub-relógio paralelo de até 15 dias corridos (inclusivos) para o Retorno.
+ * - Se o Retorno (ou a Data Atual em aberto) ultrapassar 15 dias (> 15), dispara alerta de prazo excedido
+ *   no 16º dia (passível de indeferimento manual pelo operador).
+ * - No Retorno dentro dos 15 dias, o relógio principal retoma na própria data do retorno
+ *   descontando o saldo restante de dias até zerar.
+ * - MARCO INTERRUPTOR DA CONTAGEM: "DATA DO PRONTO" (ou status concluído/entregue/deferido).
  */
 export function calcularPrazoProcesso(item: {
   dataEntrada?: string | null;
@@ -384,24 +1003,30 @@ export function calcularPrazoProcesso(item: {
   dataTramite?: string | null;
   dataValidade?: string | null;
   detalhesSST?: any;
+  dataReferenciaCalculo?: string | null;
 }): InfoPrazoProcesso {
   const tipo = item.tipoProcesso || item.tipoDocumento || 'CERTIFICADO DE APROVAÇÃO';
   const diasPrazo = getDiasPrazoPorTipo(tipo);
 
-  // Data de Entrada na SST (prioriza detalhesSST.entradaSST, dataEntrada, dataExpedicao)
   const entradaCrua =
     item.detalhesSST?.entradaSST ||
     item.dataEntrada ||
     item.dataExpedicao ||
     '';
 
-  if (!entradaCrua || entradaCrua === '-' || entradaCrua === '- - - -' || entradaCrua.trim() === '') {
+  const entradaISO = normalizeToISODate(entradaCrua);
+
+  if (!entradaISO) {
     return {
       tipoNormalizado: item.tipoProcesso || item.tipoDocumento || '',
+      statusProcesso: 'Sem data de entrada',
       diasPrazo,
       diasPrazoEfetivo: diasPrazo,
       diasBonusBilhetes: 0,
+      diasConsumidosTotal: 0,
+      saldoDiasRestantes: diasPrazo,
       prazoBilheteAtivo: false,
+      indeferidoPorDecursoBilhete: false,
       hasRetornoContinuo: false,
       dataEntradaBR: '-',
       dataEntradaISO: '',
@@ -418,182 +1043,58 @@ export function calcularPrazoProcesso(item: {
       isConcluido: false,
       concluidoNoPrazo: false,
       diasNaSST: 0,
+      historicoBlocos: [],
     };
   }
 
-  const entradaConvertida = adicionarDiasAData(entradaCrua, 0);
-  const entradaBR = entradaConvertida.dataBR;
-  const entradaISO = entradaConvertida.dataISO;
+  const entradaYear = parseInt(entradaISO.slice(0, 4), 10);
+  const entradaBR = isoToDateBR(entradaISO);
 
-  // Prazo Limite Legal Base = Entrada na SST + dias do tipo de processo
-  const prazoBase = adicionarDiasAData(entradaCrua, diasPrazo);
+  // Prazo Limite Legal Base (contagem inclusiva: entrada + (diasPrazo - 1))
+  const prazoBase = adicionarDiasAData(entradaISO, Math.max(0, diasPrazo - 1));
   const dataLimiteBaseBR = prazoBase.dataBR;
   const dataLimiteBaseISO = prazoBase.dataISO;
 
-  let dataLimiteBR = dataLimiteBaseBR;
-  let dataLimiteISO = dataLimiteBaseISO;
-  let prazoBilheteAtivo = false;
-  let bilheteAtivoRotulo: string | undefined;
-  let bilheteAtivoDataBR: string | undefined;
-  let hasRetornoContinuo = false;
-  let ultimoRetornoDataBR: string | undefined;
-  let diasBonusBilhetes = 0;
-  let diasPrazoEfetivo = diasPrazo;
-
-  // Analisa bilhetes e retornos para extensão (+15d) e continuidade do prazo
-  const sst: SSTProcessDetails | undefined = item.detalhesSST;
-  const hasAnyBilheteData = Boolean(
-    sst &&
-      ((sst.listaBilhetes && sst.listaBilhetes.length > 0) ||
-        (sst.dataBilhete && sst.dataBilhete !== '-' && sst.dataBilhete !== '- - - -') ||
-        (sst.bilhetes && sst.bilhetes !== '-' && sst.bilhetes !== '- - - -') ||
-        (sst.ultimoBilhete && sst.ultimoBilhete !== '-' && sst.ultimoBilhete !== '- - - -'))
-  );
-
-  if (hasAnyBilheteData && dataLimiteBaseISO) {
-    const bilhetesLista = deriveListaBilhetes('calc', sst);
-    const outrosUpper = String(sst?.outrosBilhetes || '').toUpperCase().trim();
-
-    let currentDeadlineISO = dataLimiteBaseISO;
-    let openBilheteStartISO: string | null = null;
-    let openBilheteRotulo = '';
-
-    const classifyItem = (b: BilheteItem, total: number): 'BILHETE' | 'RETORNO' | 'FINAL' => {
-      const stUpper = String(b.statusOuParecer || '').toUpperCase().trim();
-      const rotUpper = String(b.rotulo || '').toUpperCase().trim();
-
-      const effectiveSt =
-        total === 1 && !b.tipoDetalhe && (outrosUpper === 'FINALIZADO' || outrosUpper === 'GERADO DI')
-          ? outrosUpper
-          : stUpper;
-
-      if (
-        effectiveSt === 'FINALIZADO' ||
-        effectiveSt === 'GERADO DI' ||
-        effectiveSt.includes('DEFERID') ||
-        effectiveSt.includes('INDEFERID') ||
-        effectiveSt.includes('ENTREGU')
-      ) {
-        return 'FINAL';
-      }
-      if (
-        b.tipoDetalhe === 'RETORNO' ||
-        effectiveSt.includes('RETORNO') ||
-        rotUpper.startsWith('RETORNO')
-      ) {
-        return 'RETORNO';
-      }
-      if (
-        b.tipoDetalhe === 'BILHETE' ||
-        effectiveSt.includes('BILHETE') ||
-        rotUpper.includes('BILHETE')
-      ) {
-        return 'BILHETE';
-      }
-      if (b.tipo === 'ultimo') {
-        return 'RETORNO';
-      }
-      return 'BILHETE';
-    };
-
-    bilhetesLista.forEach((b) => {
-      const itemConv = adicionarDiasAData(b.data, 0);
-      const itemISO = itemConv.dataISO;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(itemISO)) return;
-
-      const origemConv = b.dataBilheteOrigem ? adicionarDiasAData(b.dataBilheteOrigem, 0) : null;
-      const origemISO =
-        origemConv && /^\d{4}-\d{2}-\d{2}$/.test(origemConv.dataISO) ? origemConv.dataISO : '';
-
-      const kind = classifyItem(b, bilhetesLista.length);
-
-      if (kind === 'BILHETE') {
-        openBilheteStartISO = itemISO;
-        openBilheteRotulo = (b.statusOuParecer || b.rotulo || 'BILHETE').toUpperCase().trim();
-      } else if (kind === 'RETORNO') {
-        const bilheteStart = openBilheteStartISO || origemISO || null;
-        if (bilheteStart) {
-          const elapsedOnBilhete = Math.max(0, diffDaysISO(bilheteStart, itemISO));
-          const addedDays = Math.min(15, elapsedOnBilhete);
-          const extendedByElapsed = adicionarDiasAData(currentDeadlineISO, addedDays).dataISO;
-          const bilhete15CapISO = adicionarDiasAData(bilheteStart, 15).dataISO;
-
-          currentDeadlineISO =
-            bilhete15CapISO > extendedByElapsed ? bilhete15CapISO : extendedByElapsed;
-        }
-        openBilheteStartISO = null;
-        openBilheteRotulo = '';
-        hasRetornoContinuo = true;
-        ultimoRetornoDataBR = itemConv.dataBR;
-      } else {
-        // FINAL (GERADO DI / FINALIZADO)
-        if (openBilheteStartISO) {
-          const elapsedOnBilhete = Math.max(0, diffDaysISO(openBilheteStartISO, itemISO));
-          const addedDays = Math.min(15, elapsedOnBilhete);
-          currentDeadlineISO = adicionarDiasAData(currentDeadlineISO, addedDays).dataISO;
-        }
-        openBilheteStartISO = null;
-        openBilheteRotulo = '';
-      }
-    });
-
-    if (openBilheteStartISO) {
-      // Bilhete em aberto: prazo limite ativo passa a ser Data do Bilhete + 15 dias
-      const bilhetePrazo = adicionarDiasAData(openBilheteStartISO, 15);
-      dataLimiteBR = bilhetePrazo.dataBR;
-      dataLimiteISO = bilhetePrazo.dataISO;
-      prazoBilheteAtivo = true;
-      bilheteAtivoRotulo = openBilheteRotulo || 'BILHETE';
-      bilheteAtivoDataBR = adicionarDiasAData(openBilheteStartISO, 0).dataBR;
-      diasBonusBilhetes = 15;
-      diasPrazoEfetivo = 15;
-    } else if (currentDeadlineISO && currentDeadlineISO !== dataLimiteBaseISO) {
-      dataLimiteISO = currentDeadlineISO;
-      dataLimiteBR = adicionarDiasAData(currentDeadlineISO, 0).dataBR;
-      diasBonusBilhetes = Math.max(0, diffDaysISO(dataLimiteBaseISO, currentDeadlineISO));
-      diasPrazoEfetivo = diasPrazo + diasBonusBilhetes;
-    }
-  }
-
   // DATA DO PRONTO (Marco interruptor da contagem)
   const rawDataPronto = item.detalhesSST?.dataPronto;
-  const hasDataPronto = Boolean(
-    rawDataPronto &&
-    rawDataPronto !== '-' &&
-    rawDataPronto !== '- - - -' &&
-    rawDataPronto.trim() !== ''
-  );
+  const dataProntoISO = normalizeToISODate(rawDataPronto, entradaYear);
+  const hasDataPronto = Boolean(dataProntoISO);
+  const dataProntoBR = hasDataPronto ? isoToDateBR(dataProntoISO) : '';
 
-  let dataProntoBR = '';
-  let dataProntoISO = '';
-  if (hasDataPronto) {
-    const prontoConv = adicionarDiasAData(rawDataPronto, 0);
-    dataProntoBR = prontoConv.dataBR;
-    dataProntoISO = prontoConv.dataISO;
-  }
-
-  // Identifica se o processo está concluído pelo status administrativo
+  // Identifica se o processo já está concluído pelo status administrativo (deferido/aprovado/entregue/encerrado)
   const stUpper = String(item.status || '').toUpperCase();
   const isStatusConcluido =
     stUpper === 'ENCERRADO' ||
     stUpper.includes('ENTREGU') ||
-    stUpper.includes('DEFERID') ||
+    stUpper.includes('APROVAD') ||
+    (stUpper.includes('DEFERID') && !stUpper.includes('INDEFERID')) ||
     item.detalhesSST?.situacaoDocGerado === 'ENTREGUE';
+
+  const isConcluido = hasDataPronto || isStatusConcluido;
+  const todayISO = normalizeToISODate(item.dataReferenciaCalculo, entradaYear) || getTodayISO();
+
+  const eventosBilhetes = extrairCiclosBilhetesParaCalculo(item.detalhesSST, entradaYear);
+
+  const calc = calcularPrazoDetalhado({
+    dataEntrada: entradaISO,
+    prazoTotalDias: diasPrazo,
+    bilhetes: eventosBilhetes,
+    dataReferencia: hasDataPronto ? dataProntoISO : todayISO,
+    dataPronto: dataProntoISO || undefined,
+    isConcluidoExterno: isConcluido,
+  });
+
+  const dataLimiteISO = calc.dataLimiteFinalISO || dataLimiteBaseISO;
+  const dataLimiteBR = isoToDateBR(dataLimiteISO);
 
   let diasRestantes: number | null = null;
   let diasEmAtraso = 0;
   let isVencido = false;
-  const isConcluido = hasDataPronto || isStatusConcluido;
   let concluidoNoPrazo = false;
   let diasNaSST = 0;
 
-  const todayISO = getTodayISO();
-
   if (hasDataPronto && dataProntoISO) {
-    // A CONTAGEM FOI INTERROMPIDA NA DATA DO PRONTO
-    if (entradaISO) {
-      diasNaSST = Math.max(0, diffDaysISO(entradaISO, dataProntoISO));
-    }
+    diasNaSST = dataProntoISO >= entradaISO ? calcularDiasInclusivosISO(entradaISO, dataProntoISO) : 0;
 
     if (dataLimiteISO) {
       const diffPronto = diffDaysISO(dataProntoISO, dataLimiteISO);
@@ -610,12 +1111,15 @@ export function calcularPrazoProcesso(item: {
       }
     }
   } else {
-    // PROCESSO EM ANDAMENTO (Sem Data do Pronto - contagem ativa até a data atual)
-    if (entradaISO) {
-      diasNaSST = Math.max(0, diffDaysISO(entradaISO, todayISO));
-    }
+    diasNaSST = todayISO >= entradaISO ? calcularDiasInclusivosISO(entradaISO, todayISO) : 0;
 
-    if (dataLimiteISO) {
+    if (calc.indeferidoPorDecursoBilhete) {
+      isVencido = true;
+      diasRestantes = 0;
+      diasEmAtraso = calc.dataIndeferimentoISO
+        ? Math.max(1, diffDaysISO(calc.dataIndeferimentoISO, todayISO) + 1)
+        : 1;
+    } else if (dataLimiteISO) {
       const diff = diffDaysISO(todayISO, dataLimiteISO);
       if (diff < 0) {
         isVencido = true;
@@ -631,14 +1135,22 @@ export function calcularPrazoProcesso(item: {
 
   return {
     tipoNormalizado: tipo,
+    statusProcesso: calc.statusProcesso,
     diasPrazo,
-    diasPrazoEfetivo,
-    diasBonusBilhetes,
-    prazoBilheteAtivo,
-    bilheteAtivoRotulo,
-    bilheteAtivoDataBR,
-    hasRetornoContinuo,
-    ultimoRetornoDataBR,
+    diasPrazoEfetivo: calc.prazoBilheteAtivo ? PRAZO_MAX_BILHETE_DIAS : diasPrazo + calc.diasBonusBilhetes,
+    diasBonusBilhetes: calc.diasBonusBilhetes,
+    diasConsumidosTotal: calc.diasConsumidosTotal,
+    saldoDiasRestantes: calc.saldoDiasRestantes,
+    prazoBilheteAtivo: calc.prazoBilheteAtivo,
+    bilheteAtivoRotulo: calc.bilheteAtivoRotulo,
+    bilheteAtivoDataBR: calc.bilheteAtivoDataBR,
+    bilheteAtivoLimiteBR: calc.bilheteAtivoLimiteBR,
+    bilheteAtivoDiasDecorridos: calc.bilheteAtivoDiasDecorridos,
+    indeferidoPorDecursoBilhete: calc.indeferidoPorDecursoBilhete,
+    dataIndeferimentoBR: calc.dataIndeferimentoBR,
+    dataIndeferimentoISO: calc.dataIndeferimentoISO,
+    hasRetornoContinuo: calc.hasRetornoContinuo,
+    ultimoRetornoDataBR: calc.ultimoRetornoDataBR,
     dataEntradaBR: entradaBR,
     dataEntradaISO: entradaISO,
     dataLimiteBaseBR,
@@ -654,6 +1166,7 @@ export function calcularPrazoProcesso(item: {
     isConcluido,
     concluidoNoPrazo,
     diasNaSST,
+    historicoBlocos: calc.historicoBlocos,
   };
 }
 
@@ -931,29 +1444,17 @@ export function calcularDiasDecorridosBilhete(
   dataRegistro?: string | null,
   dataPronto?: string | null
 ): number {
-  if (!dataRegistro || dataRegistro === '-' || dataRegistro === '- - - -' || dataRegistro.trim() === '') {
-    return 0;
-  }
-  const regISO = adicionarDiasAData(dataRegistro, 0).dataISO;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(regISO)) return 0;
+  const regISO = normalizeToISODate(dataRegistro);
+  if (!regISO) return 0;
 
   let endISO = getTodayISO();
-  if (
-    dataPronto &&
-    dataPronto !== '-' &&
-    dataPronto !== '- - - -' &&
-    dataPronto.trim() !== ''
-  ) {
-    const prontoISO = adicionarDiasAData(dataPronto, 0).dataISO;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(prontoISO) && prontoISO >= regISO) {
-      endISO = prontoISO;
-    }
+  const prontoISO = normalizeToISODate(dataPronto, parseInt(regISO.slice(0, 4), 10));
+  if (prontoISO && prontoISO >= regISO) {
+    endISO = prontoISO;
   }
 
-  const startMs = new Date(`${regISO}T00:00:00`).getTime();
-  const endMs = new Date(`${endISO}T00:00:00`).getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
-  return Math.max(0, Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)));
+  if (endISO < regISO) return 0;
+  return calcularDiasInclusivosISO(regISO, endISO);
 }
 
 export function deriveListaBilhetes(
@@ -1018,12 +1519,17 @@ export function deriveListaBilhetes(
       return b;
     }
     if (idx === 0 || b.tipo === 'primeiro' || b.ordem === 1) {
-      const isCopiadoErrado =
-        b.statusOuParecer &&
-        b.statusOuParecer === outrosBilhetesVal &&
-        outrosBilhetesVal.toUpperCase() !== 'BILHETE 1';
+      const stUpper = (b.statusOuParecer || '').toUpperCase().trim();
+      const rotUpper = (b.rotulo || '').toUpperCase().trim();
+      const isLegacyRetornoNoPrimeiro =
+        !b.tipoDetalhe &&
+        (stUpper === 'RETORNO' ||
+          (b.statusOuParecer &&
+            b.statusOuParecer === outrosBilhetesVal &&
+            outrosBilhetesVal.toUpperCase() !== 'BILHETE 1') ||
+          (rotUpper.includes('BILHETE') && stUpper !== 'BILHETE 1' && stUpper !== 'FINALIZADO' && stUpper !== 'GERADO DI'));
       const statusPrimeiro =
-        !b.statusOuParecer || isCopiadoErrado ? 'BILHETE 1' : b.statusOuParecer;
+        !b.statusOuParecer || isLegacyRetornoNoPrimeiro ? 'BILHETE 1' : b.statusOuParecer;
       return {
         ...b,
         rotulo: b.rotulo || '1º Bilhete',

@@ -436,18 +436,34 @@ export const NotificationRow: React.FC<NotificationRowProps> = React.memo(({
           <div className="flex flex-col items-start">
             {renderStatus()}
 
-            {/* Linha abaixo da Situação com as informações de OUTROS BILHETES */}
+            {/* Linha abaixo da Situação com as informações de OUTROS BILHETES e alerta de prazo */}
             {(() => {
               const outros = (notification.detalhesSST?.outrosBilhetes || '').trim();
-              if (!outros || outros === '-' || outros === '- - - -') return null;
+              const hasOutros = Boolean(outros && outros !== '-' && outros !== '- - - -');
+              const showAlertaBilhete = prazoInfo.indeferidoPorDecursoBilhete && !prazoInfo.isConcluido;
+
+              if (!showAlertaBilhete && !hasOutros) return null;
 
               return (
-                <div
-                  className={`text-[10.5px] font-sans mt-0.5 tracking-tight ${getOutrosBilhetesStyle(outros)}`}
-                  title={`Outros Bilhetes / Parecer: ${outros}`}
-                >
-                  {outros}
-                </div>
+                <>
+                  {hasOutros && (
+                    <div
+                      className={`text-[10.5px] font-sans mt-0.5 tracking-tight ${getOutrosBilhetesStyle(outros)}`}
+                      title={`Outros Bilhetes / Parecer: ${outros}`}
+                    >
+                      {outros}
+                    </div>
+                  )}
+                  {showAlertaBilhete && (
+                    <div
+                      className="inline-flex items-center gap-1 text-[10.5px] font-sans mt-0.5 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-900 font-semibold tracking-tight"
+                      title={`Alerta: bilhete ultrapassou 15 dias em ${prazoInfo.dataIndeferimentoBR} — passível de indeferimento manual`}
+                    >
+                      <AlertCircle className="w-3 h-3 text-amber-700 shrink-0" />
+                      <span>Alerta: bilhete &gt;15d ({prazoInfo.dataIndeferimentoBR}) — Passível de indeferimento</span>
+                    </div>
+                  )}
+                </>
               );
             })()}
           </div>
@@ -460,38 +476,46 @@ export const NotificationRow: React.FC<NotificationRowProps> = React.memo(({
                 className={`font-mono font-bold tracking-tight px-1.5 py-0.5 rounded border ${
                   prazoInfo.hasDataPronto || prazoInfo.isConcluido
                     ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                    : prazoInfo.isVencido
+                    : prazoInfo.isVencido || prazoInfo.indeferidoPorDecursoBilhete
                     ? 'text-red-700 bg-red-50 border-red-200'
+                    : prazoInfo.prazoBilheteAtivo
+                    ? 'text-purple-800 bg-purple-50 border-purple-200'
                     : prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 5
                     ? 'text-orange-700 bg-orange-50 border-orange-200'
                     : 'text-slate-900 bg-slate-50 border-slate-200'
                 }`}
                 title={
-                  prazoInfo.prazoBilheteAtivo
-                    ? `${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias = Prazo Limite: ${prazoInfo.dataLimiteBR}${prazoInfo.hasDataPronto ? ` · Pronto em ${prazoInfo.dataProntoBR}` : ''}`
-                    : `Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias${prazoInfo.diasBonusBilhetes > 0 ? ` (+${prazoInfo.diasBonusBilhetes}d bilhete/retorno)` : ''} = Prazo Limite: ${prazoInfo.dataLimiteBR}${prazoInfo.hasDataPronto ? ` · Pronto em ${prazoInfo.dataProntoBR}` : ''}`
+                  prazoInfo.indeferidoPorDecursoBilhete
+                    ? `Alerta: bilhete excedeu 15 dias em ${prazoInfo.dataIndeferimentoBR} — passível de indeferimento manual (saldo: ${prazoInfo.saldoDiasRestantes}d)`
+                    : prazoInfo.prazoBilheteAtivo
+                    ? `${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}): sub-relógio ${prazoInfo.bilheteAtivoDiasDecorridos ?? 1}/15d · Limite: ${prazoInfo.dataLimiteBR} · Saldo principal pausado: ${prazoInfo.saldoDiasRestantes}d`
+                    : `Entrada na SST: ${prazoInfo.dataEntradaBR} · Consumido: ${prazoInfo.diasConsumidosTotal}/${prazoInfo.diasPrazo}d · Prazo Limite: ${prazoInfo.dataLimiteBR}${prazoInfo.hasDataPronto ? ` · Pronto em ${prazoInfo.dataProntoBR}` : ''}`
                 }
               >
-                {prazoInfo.dataLimiteBR}
+                {prazoInfo.indeferidoPorDecursoBilhete
+                  ? (prazoInfo.dataIndeferimentoBR || prazoInfo.dataLimiteBR)
+                  : prazoInfo.dataLimiteBR}
               </span>
               <span
                 className={`text-[10px] font-mono px-1 py-0.2 rounded font-semibold border shrink-0 ${
-                  prazoInfo.prazoBilheteAtivo
+                  prazoInfo.indeferidoPorDecursoBilhete
+                    ? 'bg-red-50 text-red-800 border-red-200'
+                    : prazoInfo.prazoBilheteAtivo
                     ? 'bg-purple-50 text-purple-800 border-purple-200'
                     : 'bg-blue-50 text-blue-800 border-blue-200'
                 }`}
                 title={
-                  prazoInfo.prazoBilheteAtivo
-                    ? `Prazo do ${prazoInfo.bilheteAtivoRotulo || 'bilhete'}: +15 dias a partir de ${prazoInfo.bilheteAtivoDataBR}`
-                    : prazoInfo.diasBonusBilhetes > 0
-                    ? `Prazo base ${prazoInfo.diasPrazo}d + ${prazoInfo.diasBonusBilhetes}d de bilhete/retorno`
-                    : `Prazo legal do tipo: ${prazoInfo.diasPrazo} dias`
+                  prazoInfo.indeferidoPorDecursoBilhete
+                    ? 'Alerta: sub-relógio do bilhete ultrapassou 15 dias corridos (passível de indeferimento manual)'
+                    : prazoInfo.prazoBilheteAtivo
+                    ? `Prazo do ${prazoInfo.bilheteAtivoRotulo || 'bilhete'}: ${prazoInfo.bilheteAtivoDiasDecorridos ?? 1}/15 dias inclusivos`
+                    : `Prazo legal: ${prazoInfo.diasPrazo} dias (consumido: ${prazoInfo.diasConsumidosTotal}d)`
                 }
               >
-                {prazoInfo.prazoBilheteAtivo
-                  ? '+15d'
-                  : prazoInfo.diasBonusBilhetes > 0
-                  ? `${prazoInfo.diasPrazo}+${prazoInfo.diasBonusBilhetes}d`
+                {prazoInfo.indeferidoPorDecursoBilhete
+                  ? '>15d'
+                  : prazoInfo.prazoBilheteAtivo
+                  ? `${prazoInfo.bilheteAtivoDiasDecorridos ?? 1}/15d`
                   : `${prazoInfo.diasPrazo}d`}
               </span>
             </div>
@@ -509,23 +533,30 @@ export const NotificationRow: React.FC<NotificationRowProps> = React.memo(({
                 )
               ) : prazoInfo.isConcluido ? (
                 <span className="text-emerald-700 font-medium">Concluído / Entregue</span>
+              ) : prazoInfo.indeferidoPorDecursoBilhete ? (
+                <span className="text-amber-800 font-bold" title={`Alerta: bilhete excedeu 15 dias em ${prazoInfo.dataIndeferimentoBR} — passível de indeferimento manual`}>
+                  Alerta: bilhete &gt;15d (Saldo {prazoInfo.saldoDiasRestantes}d)
+                </span>
+              ) : prazoInfo.prazoBilheteAtivo ? (
+                <span className="text-purple-700 font-semibold" title={`Relógio principal pausado com ${prazoInfo.saldoDiasRestantes}d restantes`}>
+                  Pausado ({prazoInfo.diasRestantes}d p/ retorno · Saldo {prazoInfo.saldoDiasRestantes}d)
+                </span>
               ) : prazoInfo.isVencido ? (
                 <span className="text-red-700 font-bold">
-                  Vencido ({prazoInfo.diasEmAtraso}d em atraso{prazoInfo.prazoBilheteAtivo ? ` · ${prazoInfo.bilheteAtivoRotulo || 'Bilhete'}` : ''})
+                  Vencido ({prazoInfo.diasEmAtraso}d em atraso)
                 </span>
               ) : prazoInfo.diasRestantes === 0 ? (
                 <span className="text-orange-700 font-bold">
-                  Vence hoje{prazoInfo.prazoBilheteAtivo ? ` (${prazoInfo.bilheteAtivoRotulo || 'Bilhete'})` : ''}
+                  Vence hoje
                 </span>
               ) : prazoInfo.diasRestantes !== null && prazoInfo.diasRestantes <= 5 ? (
                 <span className="text-orange-700 font-bold">
                   {prazoInfo.diasRestantes} {prazoInfo.diasRestantes === 1 ? 'dia restante' : 'dias restantes'}
-                  {prazoInfo.prazoBilheteAtivo ? ` (${prazoInfo.bilheteAtivoRotulo || 'Bilhete'})` : ''}
                 </span>
               ) : (
                 <span className="text-blue-700 font-medium">
                   {prazoInfo.diasRestantes !== null
-                    ? `${prazoInfo.diasRestantes} dias restantes${prazoInfo.prazoBilheteAtivo ? ` (${prazoInfo.bilheteAtivoRotulo || 'Bilhete'})` : ''}`
+                    ? `${prazoInfo.diasRestantes} dias restantes`
                     : 'No prazo'}
                 </span>
               )}

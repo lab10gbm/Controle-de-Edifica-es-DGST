@@ -15,7 +15,8 @@ import {
   calcularPrazoProcesso,
   calcularDiasDecorridosBilhete,
   deriveListaBilhetes,
-  buildDetalhesSSTWithBilhetes
+  buildDetalhesSSTWithBilhetes,
+  LIMITE_MAX_BILHETES_PROCESSO
 } from '../utils/helpers';
 import { cleanProcessLinkValue, ProcessLinkInfo } from '../utils/processLinks';
 import { 
@@ -100,6 +101,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     () => notification.fiscalResponsavel?.trim() || 'Fiscal SST 10º GBM'
   );
   const [novoBilheteDespacho, setNovoBilheteDespacho] = useState<string>('');
+  const [bilheteFormError, setBilheteFormError] = useState<string | null>(null);
 
   const sst = notification.detalhesSST || {};
   const prazoInfo = calcularPrazoProcesso(notification);
@@ -223,7 +225,22 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
 
   const handleSaveNovoBilhete = (e: React.FormEvent) => {
     e.preventDefault();
+    setBilheteFormError(null);
     if (!novoBilheteData.trim()) return;
+
+    const totalBilhetesAtuais = listaBilhetes.filter(
+      (b) =>
+        b.tipoDetalhe === 'BILHETE' ||
+        (b.tipoDetalhe !== 'RETORNO' &&
+          b.tipo !== 'ultimo' &&
+          !/retorno/i.test(b.rotulo || '') &&
+          !/retorno/i.test(b.statusOuParecer || ''))
+    ).length;
+
+    if (!editingBilheteTarget && novoDetalheTipo === 'BILHETE' && totalBilhetesAtuais >= LIMITE_MAX_BILHETES_PROCESSO) {
+      setBilheteFormError(`Limite máximo de ${LIMITE_MAX_BILHETES_PROCESSO} bilhetes por processo atingido.`);
+      return;
+    }
 
     const dataFormatada = formatDateBR(novoBilheteData.trim());
     const diasCalculados = calcularDiasDecorridosBilhete(dataFormatada, sst.dataPronto);
@@ -280,13 +297,14 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
         nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-'
           ? nextPrazo.dataLimiteBR
           : notification.dataValidade;
+      const hasBilheteExcedido = nextPrazo.indeferidoPorDecursoBilhete && !nextPrazo.isConcluido;
 
       const editLog: AuditLog = {
         id: `log-b-edit-${Date.now()}`,
         data: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
         autor: autorRegistro,
         acao: `${detalheRotulo} Editado`,
-        detalhes: `${detalheRotulo} atualizado para ${dataFormatada} (${diasCalculados} dia(s) decorrido(s)). Situação: ${parecerFinal}.${nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-' ? ` Prazo limite: ${nextPrazo.dataLimiteBR}.` : ''} ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
+        detalhes: `${detalheRotulo} atualizado para ${dataFormatada} (${diasCalculados} dia(s) inclusivo(s)). Situação: ${parecerFinal}.${hasBilheteExcedido ? ` Alerta: bilhete ultrapassou 15 dias em ${nextPrazo.dataIndeferimentoBR} (passível de indeferimento manual).` : nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-' ? ` Prazo limite: ${nextPrazo.dataLimiteBR}.` : ''} ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
       };
 
       if (onUpdateNotification) {
@@ -335,13 +353,14 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
       nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-'
         ? nextPrazo.dataLimiteBR
         : notification.dataValidade;
+    const hasBilheteExcedido = nextPrazo.indeferidoPorDecursoBilhete && !nextPrazo.isConcluido;
 
     const newLog: AuditLog = {
       id: `log-b-${Date.now()}`,
       data: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
       autor: autorRegistro,
       acao: `${detalheRotulo} Registrado`,
-      detalhes: `${detalheRotulo} registrado em ${dataFormatada} (${diasCalculados} dia(s) decorrido(s)). Situação: ${parecerFinal}.${nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-' ? ` Prazo limite: ${nextPrazo.dataLimiteBR}.` : ''} ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
+      detalhes: `${detalheRotulo} registrado em ${dataFormatada} (${diasCalculados} dia(s) inclusivo(s)). Situação: ${parecerFinal}.${hasBilheteExcedido ? ` Alerta: bilhete ultrapassou 15 dias em ${nextPrazo.dataIndeferimentoBR} (passível de indeferimento manual).` : nextPrazo.dataLimiteBR && nextPrazo.dataLimiteBR !== '-' ? ` Prazo limite: ${nextPrazo.dataLimiteBR}.` : ''} ${novoBilheteDespacho ? `Despacho: ${novoBilheteDespacho}` : ''}`,
     };
 
     if (onUpdateNotification) {
@@ -356,7 +375,7 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
     } else {
       onAddQuickNote(
         notification.id,
-        `${detalheRotulo} registrado (${dataFormatada}, ${diasCalculados} dia(s) decorrido(s)): ${parecerFinal}. ${novoBilheteDespacho}`,
+        `${detalheRotulo} registrado (${dataFormatada}, ${diasCalculados} dia(s)): ${parecerFinal}. ${novoBilheteDespacho}`,
         autorRegistro
       );
     }
@@ -407,36 +426,37 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                 Concluído / Entregue (Prazo: {prazoInfo.diasPrazo} dias)
               </span>
+            ) : prazoInfo.indeferidoPorDecursoBilhete ? (
+              <span
+                className="inline-flex items-center gap-1 text-amber-950 bg-amber-100 px-2.5 py-0.5 rounded font-bold border border-amber-300"
+                title={`Alerta: bilhete ultrapassou 15 dias corridos em ${prazoInfo.dataIndeferimentoBR} — passível de indeferimento manual. Saldo: ${prazoInfo.saldoDiasRestantes}d.`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                Alerta: Bilhete excedeu 15d em {prazoInfo.dataIndeferimentoBR} (Saldo: {prazoInfo.saldoDiasRestantes}d) · Passível de indeferimento manual
+              </span>
+            ) : prazoInfo.prazoBilheteAtivo ? (
+              <span
+                className="inline-flex items-center gap-1 text-purple-900 bg-purple-100 px-2.5 py-0.5 rounded font-semibold border border-purple-300"
+                title={`${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}): contagem inclusiva até 15 dias = Limite ${prazoInfo.dataLimiteBR}. Saldo principal pausado: ${prazoInfo.saldoDiasRestantes}d.`}
+              >
+                <Clock className="w-3.5 h-3.5 text-purple-700" />
+                Pausado em {prazoInfo.bilheteAtivoRotulo || 'Bilhete'} ({prazoInfo.bilheteAtivoDiasDecorridos ?? 1}/15d) · Limite Retorno: {prazoInfo.dataLimiteBR} · Saldo: {prazoInfo.saldoDiasRestantes}d
+              </span>
             ) : prazoInfo.isVencido ? (
               <span
                 className="inline-flex items-center gap-1 text-rose-800 bg-rose-100 px-2.5 py-0.5 rounded font-bold border border-rose-200"
-                title={
-                  prazoInfo.prazoBilheteAtivo
-                    ? `${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias = Limite: ${prazoInfo.dataLimiteBR}`
-                    : `Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Limite: ${prazoInfo.dataLimiteBR}`
-                }
+                title={`Entrada na SST: ${prazoInfo.dataEntradaBR} · Prazo: ${prazoInfo.diasPrazo} dias · Limite: ${prazoInfo.dataLimiteBR}`}
               >
                 <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
                 Prazo Vencido ({prazoInfo.diasEmAtraso} dia(s) em atraso) · Limite: {prazoInfo.dataLimiteBR}
-                {prazoInfo.prazoBilheteAtivo ? ` (${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} +15d)` : ''}
               </span>
             ) : (
               <span
                 className="inline-flex items-center gap-1 text-blue-800 bg-blue-100 px-2.5 py-0.5 rounded font-medium border border-blue-200"
-                title={
-                  prazoInfo.prazoBilheteAtivo
-                    ? `${prazoInfo.bilheteAtivoRotulo || 'BILHETE'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias = Limite: ${prazoInfo.dataLimiteBR}`
-                    : `Entrada na SST: ${prazoInfo.dataEntradaBR} + ${prazoInfo.diasPrazo} dias = Limite: ${prazoInfo.dataLimiteBR}`
-                }
+                title={`Entrada na SST: ${prazoInfo.dataEntradaBR} · Consumidos: ${prazoInfo.diasConsumidosTotal}/${prazoInfo.diasPrazo}d · Limite: ${prazoInfo.dataLimiteBR}`}
               >
                 <Clock className="w-3.5 h-3.5 text-blue-600" />
-                No Prazo ({prazoInfo.diasRestantes} dias restantes) · Limite: {prazoInfo.dataLimiteBR} (
-                {prazoInfo.prazoBilheteAtivo
-                  ? `${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} +15d`
-                  : prazoInfo.diasBonusBilhetes > 0
-                  ? `${prazoInfo.diasPrazo}d + ${prazoInfo.diasBonusBilhetes}d`
-                  : `${prazoInfo.diasPrazo} dias`}
-                )
+                No Prazo ({prazoInfo.diasRestantes} dia(s) restante(s)) · Limite: {prazoInfo.dataLimiteBR} ({prazoInfo.diasConsumidosTotal}/{prazoInfo.diasPrazo}d)
               </span>
             )}
           </div>
@@ -870,16 +890,20 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
               </div>
 
               <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-semibold text-slate-500 block uppercase">Prazo Limite</span>
+                <span className="text-[11px] font-semibold text-slate-500 block uppercase">
+                  {prazoInfo.indeferidoPorDecursoBilhete ? 'Alerta Bilhete (>15d)' : 'Prazo Limite'}
+                </span>
                 <div className="flex items-baseline gap-1.5 mt-0.5">
-                  <span className="text-sm font-bold font-mono text-indigo-900">{prazoInfo.dataLimiteBR}</span>
+                  <span className={`text-sm font-bold font-mono ${prazoInfo.indeferidoPorDecursoBilhete ? 'text-amber-800' : 'text-indigo-900'}`}>
+                    {prazoInfo.indeferidoPorDecursoBilhete ? (prazoInfo.dataIndeferimentoBR || prazoInfo.dataLimiteBR) : prazoInfo.dataLimiteBR}
+                  </span>
                 </div>
                 <span className="text-[10px] text-slate-500 block mt-0.5">
-                  {prazoInfo.prazoBilheteAtivo
-                    ? `${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} (${prazoInfo.bilheteAtivoDataBR}) + 15 dias`
-                    : prazoInfo.diasBonusBilhetes > 0
-                    ? `Entrada + ${prazoInfo.diasPrazo}d (+${prazoInfo.diasBonusBilhetes}d retorno)`
-                    : `Entrada + ${prazoInfo.diasPrazo} dias`}
+                  {prazoInfo.indeferidoPorDecursoBilhete
+                    ? '16º dia do bilhete (>15d) · Passível indef.'
+                    : prazoInfo.prazoBilheteAtivo
+                    ? `${prazoInfo.bilheteAtivoRotulo || 'Bilhete'} (${prazoInfo.bilheteAtivoDataBR}) · 15d inclusivo`
+                    : `Consumido: ${prazoInfo.diasConsumidosTotal}/${prazoInfo.diasPrazo}d · Saldo: ${prazoInfo.saldoDiasRestantes}d`}
                 </span>
               </div>
 
@@ -896,6 +920,14 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                     )
                   ) : prazoInfo.isConcluido ? (
                     <span className="text-base font-bold text-emerald-700">Concluído</span>
+                  ) : prazoInfo.indeferidoPorDecursoBilhete ? (
+                    <span className="text-xs font-bold text-amber-800 leading-tight">
+                      Alerta: bilhete &gt; 15d
+                    </span>
+                  ) : prazoInfo.prazoBilheteAtivo ? (
+                    <span className="text-sm font-bold font-mono text-purple-700">
+                      Pausado ({prazoInfo.bilheteAtivoDiasDecorridos ?? 1}/15d)
+                    </span>
                   ) : prazoInfo.isVencido ? (
                     <span className="text-base font-bold font-mono text-rose-700">
                       {prazoInfo.diasEmAtraso}d em atraso
@@ -911,6 +943,10 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                     ? `Contagem parada em ${prazoInfo.dataProntoBR}`
                     : prazoInfo.isConcluido
                     ? 'Finalizado'
+                    : prazoInfo.indeferidoPorDecursoBilhete
+                    ? `Passível de indeferimento · Saldo: ${prazoInfo.saldoDiasRestantes}d`
+                    : prazoInfo.prazoBilheteAtivo
+                    ? `Retorno até ${prazoInfo.dataLimiteBR}`
                     : prazoInfo.isVencido
                     ? 'Vencido em andamento'
                     : 'No prazo legal'}
@@ -925,6 +961,60 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                 <span className="text-[10px] text-purple-600 block mt-0.5">Controle do acervo</span>
               </div>
             </div>
+
+            {prazoInfo.historicoBlocos.length > 0 && (
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-indigo-600" />
+                    <span>Extrato de Contagem do Prazo (Regra Inclusiva · Blocos &amp; Pausas)</span>
+                  </h4>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold">
+                      Consumido: {prazoInfo.diasConsumidosTotal}/{prazoInfo.diasPrazo}d
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 font-semibold">
+                      Saldo: {prazoInfo.saldoDiasRestantes}d
+                    </span>
+                    <span className={`px-2 py-0.5 rounded border font-bold ${
+                      prazoInfo.indeferidoPorDecursoBilhete
+                        ? 'bg-amber-50 text-amber-900 border-amber-300'
+                        : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                    }`}>
+                      {prazoInfo.indeferidoPorDecursoBilhete
+                        ? `Alerta >15d: ${prazoInfo.dataIndeferimentoBR}`
+                        : `Limite: ${prazoInfo.dataLimiteBR}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {prazoInfo.historicoBlocos.map((bloco) => {
+                    const isExp = bloco.tipo === 'BILHETE_EXPIRADO';
+                    const isPause = bloco.tipo === 'BILHETE_PAUSA' || bloco.tipo === 'BILHETE_ABERTO';
+                    return (
+                      <div
+                        key={bloco.ordem}
+                        className={`p-2.5 rounded-lg border text-xs ${
+                          isExp
+                            ? 'bg-rose-50/70 border-rose-200 text-rose-900'
+                            : isPause
+                            ? 'bg-amber-50/60 border-amber-200 text-amber-950'
+                            : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 font-bold">
+                          <span className="truncate">{bloco.titulo}</span>
+                          <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-white/80 border border-current/15 shrink-0">
+                            {bloco.dias}d
+                          </span>
+                        </div>
+                        <p className="text-[11px] mt-1 opacity-90 leading-snug">{bloco.descricao}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
@@ -1316,10 +1406,16 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                     </span>
                     <span className="text-[10px] text-blue-700 font-medium">
                       {novoDetalheTipo === 'BILHETE'
-                        ? `Prazo +15d: ${adicionarDiasAData(novoBilheteData, 15).dataBR} · ${calcularDiasDecorridosBilhete(novoBilheteData, sst.dataPronto)}d decorrido(s)`
-                        : `Continuidade do prazo na data do retorno · ${calcularDiasDecorridosBilhete(novoBilheteData, sst.dataPronto)}d decorrido(s)`}
+                        ? `15º dia (limite): ${adicionarDiasAData(novoBilheteData, 14).dataBR} · Alerta >15d no 16º dia: ${adicionarDiasAData(novoBilheteData, 15).dataBR} · ${calcularDiasDecorridosBilhete(novoBilheteData, sst.dataPronto)}d inclusivo(s)`
+                        : `Retoma o relógio principal em ${formatDateBR(novoBilheteData)} · ${calcularDiasDecorridosBilhete(novoBilheteData, sst.dataPronto)}d inclusivo(s)`}
                     </span>
                   </div>
+
+                  {bilheteFormError && (
+                    <div className="px-2.5 py-1.5 rounded bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-semibold">
+                      {bilheteFormError}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                     <div>
@@ -1501,13 +1597,17 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                                   ? 'text-orange-700'
                                   : 'text-purple-700'
                               }`}
-                              title={`Prazo de 15 dias do bilhete: até ${prazoInfo.dataLimiteBR}`}
+                              title={`Sub-relógio 15d inclusivos: até ${prazoInfo.dataLimiteBR}`}
                             >
-                              {prazoInfo.isVencido
-                                ? `Venc. +15d (${prazoInfo.diasEmAtraso}d)`
-                                : prazoInfo.diasRestantes === 0
-                                ? `Limite hoje (${prazoInfo.dataLimiteBR})`
-                                : `Até ${prazoInfo.dataLimiteBR} (${prazoInfo.diasRestantes}d)`}
+                              {prazoInfo.bilheteAtivoDiasDecorridos ?? 1}/15d · Limite {prazoInfo.dataLimiteBR}
+                            </div>
+                          )}
+                          {bIdx === listaBilhetes.length - 1 && prazoInfo.indeferidoPorDecursoBilhete && (
+                            <div
+                              className="text-[10px] font-sans font-bold mt-0.5 whitespace-nowrap text-amber-800"
+                              title={`Alerta: excedeu 15 dias em ${prazoInfo.dataIndeferimentoBR} (passível de indeferimento manual)`}
+                            >
+                              Alerta &gt;15d · {prazoInfo.dataIndeferimentoBR}
                             </div>
                           )}
                         </td>
@@ -1557,6 +1657,60 @@ export const RowExpandedDetails: React.FC<RowExpandedDetailsProps> = ({
                   </tbody>
                 </table>
               </div>
+
+              {prazoInfo.historicoBlocos.length > 0 && (
+                <div className="pt-3 border-t border-slate-100 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Timer className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Extrato de Contagem Inclusiva do Prazo (Pausas &amp; Retomadas)</span>
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-mono">
+                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 font-semibold">
+                        Consumido: {prazoInfo.diasConsumidosTotal}/{prazoInfo.diasPrazo}d
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 font-semibold">
+                        Saldo: {prazoInfo.saldoDiasRestantes}d
+                      </span>
+                      <span className={`px-2 py-0.5 rounded border font-bold ${
+                        prazoInfo.indeferidoPorDecursoBilhete
+                          ? 'bg-amber-50 text-amber-900 border-amber-300'
+                          : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                      }`}>
+                        {prazoInfo.indeferidoPorDecursoBilhete
+                          ? `Alerta >15d em ${prazoInfo.dataIndeferimentoBR}`
+                          : `Data Limite Final: ${prazoInfo.dataLimiteBR}`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {prazoInfo.historicoBlocos.map((bloco) => {
+                      const isExp = bloco.tipo === 'BILHETE_EXPIRADO';
+                      const isPause = bloco.tipo === 'BILHETE_PAUSA' || bloco.tipo === 'BILHETE_ABERTO';
+                      return (
+                        <div
+                          key={`hist-bloco-${bloco.ordem}`}
+                          className={`p-2 rounded-lg border text-[11px] ${
+                            isExp
+                              ? 'bg-rose-50/70 border-rose-200 text-rose-900'
+                              : isPause
+                              ? 'bg-amber-50/60 border-amber-200 text-amber-950'
+                              : 'bg-slate-50 border-slate-200 text-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 font-bold">
+                            <span className="truncate">{bloco.titulo}</span>
+                            <span className="font-mono px-1.5 py-0.2 rounded bg-white/80 border border-current/15 shrink-0">
+                              {bloco.dias}d
+                            </span>
+                          </div>
+                          <div className="text-[10.5px] mt-0.5 opacity-90 leading-snug">{bloco.descricao}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col lg:flex-row items-start gap-4">
